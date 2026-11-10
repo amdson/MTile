@@ -877,3 +877,63 @@ Got worse, or not met:
 - Ground jump is still the item-4 regression (fixed in item 7).
 - `PreserveExternalVelocity` is no longer what keeps a hit from being braked on the ground; any
   remaining reader that assumed so was not audited beyond the two listed.
+
+### Item 7 — the jump channel (§11)
+
+Change:
+- **One solver channel** (`CorrectionChannel.Jump`, `CorrectorChannels.AddJump`): up-only, cap
+  `JumpPushForce` (new key, 7500 px/s²), never pushing the rise past `JumpTopSpeed` (new key,
+  145 px/s) relative to the launch surface — the existing `RiseCap` mechanism, so the push fades
+  as the rise approaches the top speed and then sustains it against gravity. Created in
+  `JumpingState.Enter`; live while the button is held, up to `MaxJumpHoldTime` (7 frames), in
+  `MovementVars.JumpHoldFrames` (rollback state, with `JumpSourceVy`). After creation it is not
+  gated on the environment. It replaces the leg servo while live (LegServo's mask); Drive and
+  Tuck stay with the Legs grant. Nothing writes velocity. The progress row's vertical authority
+  is the channel's cap while it lives, and the rising plan is tilted by its top speed instead of
+  the leg servo's push-fade speed (400), which had made the plan a near-vertical column and had
+  the running jump's band brake vx 59.9 → 13.6 on takeoff.
+- **Creation**: `JumpingState` is entered with the `Legs` probe, or with a gripped corner in reach
+  out of a hang or a climb (the hands-created corner push-off). The state lives while the channel
+  lives and then while the body still rises (the coast, under the fall profile), so Standing does
+  not re-catch a rising tap.
+- **Running jump** = `RunningJumpState : JumpingState`, the same channel and numbers; entry needs
+  the Legs probe and speed relative to the floor ≥ `RunJumpEntrySpeed` (new key, 57) in the
+  pressed direction. Its overhead-clearance gate and `RunJumpApexRise` are gone (the planner
+  handles ceilings as it does for the ground jump).
+- **Deleted**: the impulse variant (`JumpImpulse`, `JumpFromCorner`, the source FSDs and
+  `TryFindSource`, the 60 px `JumpSourceProbeSlack`, `SoftContactOwner.JumpSource` /
+  `RunningJumpSource`), `JumpSupportChecker`, the stair-tread special case (`OnStairTread`: the
+  unified Legs probe is the fix), `RunJumpVelocity`/`RunJumpHoldForce`/`RunJumpMinSpeed`,
+  `JumpEntryY`. Tests that only tested removed code: `JumpSupportTests`,
+  `RunningJumpLatticeTests`, `SpeedInvariantTests.AssistCap_IsWhatAHeldGroundJumpAchieves`.
+  The live JSON keeps its now-unread `RunJumpMinSpeed` value (I only add keys there).
+- **Three launches that used the no-legs variant** (§10 q2): stair tread → jumps iff Legs
+  passes; floor just out of reach / lip beside the body → no jump source, so the double jump;
+  corner push-off out of a hang or climb → hands-created jump channel.
+- `MaxAssistRiseSpeed` is now max(JumpTopSpeed, the covered jump's write + hold, the double
+  jump).
+- Left as they are: double jump, wall jump, ledge jump, and **CoveredJumpState** (its phase 2
+  still writes `JumpVelocity` and applies `JumpHoldForce`; the plan did not list it).
+
+| Measure (trace, r2 #11 / r1 F, G) | Before (base) | Now |
+|---|---|---|
+| Neutral jump rise by hold 1/2/3/4/5/6/7+ f (px) | 23.7 / 30.2 / – / 33.1 / – / 33.1 / 33.1 | 12.0 / 20.5 / 22.9 / 25.3 / 27.7 / 30.2 / 32.6 |
+| Running jump rise by hold 1/2/4/7+ f (px) | – / – / – / 39.1 | 13.0 / 19.3 / 25.3 / 32.5 |
+| Running jump: vx at takeoff → min in first 8 f | 59.6 → 24 (base) / 51.1 (item 6) | 59.9 → 52.4 (Redirect, launch frame) then 53.9 |
+| Running jump downrange (R held) | 58.5 px | 45.4 px |
+| Victim holding jump through S1 (dx at hitstun end) | 18.4 (left as a running jump on knockback speed) | 3.7 |
+| Low-ceiling jump (r2 #8): rise speed at the bonk | 172.8 | 144.8 (the top speed) |
+
+Decisions not in the plan:
+- Numbers: 7500 / 145 give a tap ≈ 37% of full hold and +2.4 px per held frame; one tuning step
+  from 140 (30.9 px full) to 145 to land near 33.
+- The running jump has the same height as the ground jump (§11.3 left it open). 39 → 32.5 px.
+- A buffered jump pressed and released before the state is entered still gets one frame of push.
+- After release the state stays `JumpingState` while rising (fall profile, legs and hands
+  available) instead of handing the body to Falling/Standing at once.
+
+Not met / worse:
+- Running jump: min vx 52.4 vs takeoff 59.9 (target ≥ takeoff). Cause, traced: Redirect on the
+  launch frame (−453, the Legs probe still passes at vy 0). Redirect is out of scope (§0).
+- Running jump lands 13 px shorter (lower apex, and air control holds vx at `MaxAirSpeed` 54 after
+  the launch-frame loss).

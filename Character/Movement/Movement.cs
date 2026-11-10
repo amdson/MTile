@@ -43,7 +43,6 @@ namespace MTile;
 public enum SoftContactOwner : byte
 {
     None = 0,
-    JumpSource, RunningJumpSource,
     CoveredGroundStand, CoveredGroundCrouch,
     LedgeWallLeft, LedgeFloorLeft, LedgeWallRight, LedgeFloorRight,
     WallSlideWallLeft, WallSlideGroundLeft, WallSlideWallRight, WallSlideGroundRight,

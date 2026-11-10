@@ -55,37 +55,25 @@ public class MovementConfig
         get
         {
             float g = Simulation.WorldGravityY;
-            float jump = -JumpVelocity
+            float covered = -JumpVelocity
                 + MathF.Max(0f, (-JumpHoldForce - g) * MaxJumpHoldTime);
-            float run = -RunJumpVelocity
-                + MathF.Max(0f, (-RunJumpHoldForce - g) * MaxJumpHoldTime);
-            return MathF.Max(jump, MathF.Max(run, -DoubleJumpVelocity));
+            return MathF.Max(JumpTopSpeed, MathF.Max(covered, -DoubleJumpVelocity));
         }
     }
-    // Height a full-hold running jump rises above its launch point: the hold
-    // window under RunJumpHoldForce, then the ballistic coast to the apex
-    // (≈49 px at default tuning). Derived like MaxAssistRiseSpeed. The height
-    // RunningJumpState needs clear overhead — see its precondition.
-    public float RunJumpApexRise
-    {
-        get
-        {
-            float g = Simulation.WorldGravityY, t = MaxJumpHoldTime;
-            float v0 = -RunJumpVelocity;
-            float v1 = MathF.Max(0f, v0 + (-RunJumpHoldForce - g) * t);
-            return 0.5f * (v0 + v1) * t + v1 * v1 / (2f * g);
-        }
-    }
+    // The jump channel (Plans/MOVEMENT_RESOURCE_MODEL.md §11): an upward push
+    // created when jump is pressed with the feet planted (or a corner in the
+    // hands), live while the button is held, up to MaxJumpHoldTime. Its cap is
+    // JumpPushForce and it never pushes the rise (relative to the surface it
+    // left) past JumpTopSpeed, so the first frame is a solid kick (a tap is a
+    // short hop) and each further held frame adds about JumpTopSpeed·dt of
+    // height. Starting values aimed at ≈33 px full hold and ≈11 px for a tap.
+    public float JumpPushForce { get; set; } = 7500f;
+    public float JumpTopSpeed  { get; set; } = 145f;
+    // (JumpVelocity / JumpHoldForce / JumpInitForce now drive only
+    // CoveredJumpState's phase 2, which is left as it is.)
     public float JumpHoldForce { get; set; } = -1312.5f;
     public float JumpInitForce { get; set; } = 0f;
     public float MaxJumpHoldTime { get; set; } = 0.12f;
-    // Wider-than-Standing probe slack for the jump-source FSD. Jumping states
-    // keep an FSD pointing at the surface the player launched from so the jump
-    // velocity is defined *relative* to that surface (essential when entering
-    // from Parkour with ramp-redirected vy). The window has to outlast the
-    // held-jump ascent (~20 px at default tuning) or CheckConditions trips
-    // mid-jump and the hold force cuts out.
-    public float JumpSourceProbeSlack { get; set; } = 60f;
 
     // Wall Sliding
     public float SlideTerminalSpeed { get; set; } = 32f;
@@ -138,9 +126,10 @@ public class MovementConfig
     public float ArcJumpRunSpeed { get; set; } = 30f;
 
     // Running Jump
-    public float RunJumpVelocity { get; set; } = -105f;
-    public float RunJumpHoldForce { get; set; } = -1050f;
-    public float RunJumpMinSpeed { get; set; } = 48f;
+    // The running jump is the jump entered with speed: horizontal speed at
+    // least this, in the direction being pressed. Under the 59.6 px/s steady
+    // walk (a walk's first frames are 48.6, 54.0, 56.7, 58.2, 58.9).
+    public float RunJumpEntrySpeed { get; set; } = 57f;
 
 
     // Ledge Grab / Pull

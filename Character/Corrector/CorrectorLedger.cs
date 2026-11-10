@@ -26,6 +26,7 @@ public enum CorrectionChannel : byte
     GripPull,       // hands on a gripped corner: pull over the lip (inward-only, pace-faded)
     GripHold,       // hands on a gripped corner: tension toward it (down onto the lip at the crest)
     GripBrace,      // feet off the wall face below the lip: away from the wall
+    Jump,           // the jump channel (§11): up-only push, created by a jump press, capped at a top rise speed
 }
 
 // Per-step bookkeeping of what the corrector solve actually exerted — the

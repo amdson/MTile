@@ -156,6 +156,28 @@ public class ZzzMovementResponse2
         }
         Solo(sb, "10 detail: slip from vx=150, idle", Rows(E, E, E, E, E, E, F), new Vector2(150, restY), InputScript.Always(None), 14, 0, 14, new Vector2(150f, 0f));
 
+        // 11. Jump height by hold length (plan §11: a tap is a short hop, each held frame adds about the
+        // same height up to the hold time), neutral and running (R held 30f first).
+        sb.AppendLine("## 11 jump rise (px) by hold frames: neutral | running");
+        foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 7, 8, 12 })
+        {
+            float Rise(bool run)
+            {
+                var sc = new InputScript().For(40, None);
+                if (run) sc = sc.For(30, R);
+                sc = sc.For(n, run ? RJ : new PlayerInput { Space = true }).Forever(run ? R : None);
+                var s11 = new StringBuilder();
+                int f0 = run ? 70 : 40;
+                Solo(s11, "", Rows(E, E, E, E, E, E, F), new Vector2(150, restY), sc, f0 + 60, f0 - 1, f0 + 60);
+                var ys = s11.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1)
+                    .Select(l => float.Parse(l.Substring(l.IndexOf("y=") + 2, 6))).ToArray();
+                return ys[0] - ys.Min();
+            }
+            sb.AppendLine($"  hold {n,2}f: {Rise(false),6:F2} | {Rise(true),6:F2}");
+        }
+        Solo(sb, "11 detail: neutral jump, held 12f", Rows(E, E, E, E, E, E, F), new Vector2(150, restY),
+            new InputScript().For(40, None).For(12, new PlayerInput { Space = true }).Forever(None), 70, 38, 66);
+
         // ── Post-hit ─────────────────────────────────────────────────────────
         // Attacker at x=200 facing +x runs the ground string (tap every 5f from f13); victim 24px ahead.
         var flat = new[] { E, E, E, E, E, E, F };

@@ -61,7 +61,8 @@ public static class CorrectorChannels
     // (braking) keeps the cap. Not conditioned on the path: the axis is x,
     // the mask is the Legs grant.
     public static int BuildFold(CorrectorScratch s, int n, int dir, float supportVy, MovementResource granted,
-                                float driveCap, float vRelX, float walk)
+                                float driveCap, float vRelX, float walk,
+                                int jumpTicks = 0, float jumpRiseCap = 0f)
     {
         var cfg = MovementConfig.Current;
         float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
@@ -118,7 +119,7 @@ public static class CorrectorChannels
         // "full": the whole stack.
         for (int k = 0; k < n; k++)
         {
-            s.ChannelMask[0][k] = legs;                                   // LegServo
+            s.ChannelMask[0][k] = legs && jumpTicks == 0;                 // LegServo (the jump replaces it)
             s.ChannelMask[1][k] = legs;                                   // Drive
             s.ChannelMask[2][k] = cfg.FoldRedirectEnabled                 // Redirect: floor or corner
                                   && (legs || (hands && s.CornerPlant[k]));
@@ -166,7 +167,26 @@ public static class CorrectorChannels
             Id = CorrectionChannel.Drive,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(-1f, 0f), Cap = DriveSideCap(driveCap, walk + vRelX), ActiveMask = s.ChannelMask[4] };
-        return AddContactPush(s, n, dir, hands, AddCornerPlant(s, n, hands, 5));
+        return AddJump(s, n, jumpTicks, jumpRiseCap,
+            AddContactPush(s, n, dir, hands, AddCornerPlant(s, n, hands, 5)));
+    }
+
+    // The jump channel (Plans/MOVEMENT_RESOURCE_MODEL.md §11): up-only, capped
+    // at JumpPushForce, never taking the rise past `riseCap` (the top speed
+    // relative to the launch surface — the RiseCap mechanism, so it sustains
+    // the top speed against gravity and fades as the rise approaches it).
+    // Gated at creation only: live on the ticks the hold has left, whatever
+    // the environment. Priced like the legs it replaces.
+    private static int AddJump(CorrectorScratch s, int n, int jumpTicks, float riseCap, int slot)
+    {
+        if (jumpTicks <= 0) return slot;
+        for (int k = 0; k < n; k++) s.ChannelMask[slot][k] = k < jumpTicks;
+        s.Problem.Channels[slot] = new ChannelDef {
+            Id = CorrectionChannel.Jump,
+            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(0f, -1f), Cap = MovementConfig.Current.JumpPushForce, RiseCap = riseCap,
+            ActiveMask = s.ChannelMask[slot] };
+        return slot + 1;
     }
 
     // A Drive side's cap: the one cap, but never more than adds `room` px/s

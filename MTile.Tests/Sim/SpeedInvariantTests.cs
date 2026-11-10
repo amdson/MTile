@@ -168,25 +168,6 @@ public class SpeedInvariantTests(ITestOutputHelper output)
     // ── Contracts ────────────────────────────────────────────────────────────
 
     [Fact]
-    public void AssistCap_IsWhatAHeldGroundJumpAchieves()
-    {
-        // Launch impulse + hold-force augmentation over the full hold window —
-        // the bare launch constant (120) only reaches 12px of height; jumps
-        // earn theirs from the hold. ≈208 at default tuning: enough for the
-        // 1-block apex hop (~170), a hard ceiling for the lip-timing demand.
-        var cfg = MovementConfig.Current;
-        float g = Simulation.WorldGravityY;
-        float expected = MathF.Max(
-            -cfg.JumpVelocity + MathF.Max(0f, (-cfg.JumpHoldForce - g) * cfg.MaxJumpHoldTime),
-            MathF.Max(
-                -cfg.RunJumpVelocity + MathF.Max(0f, (-cfg.RunJumpHoldForce - g) * cfg.MaxJumpHoldTime),
-                -cfg.DoubleJumpVelocity));
-        Assert.Equal(expected, cfg.MaxAssistRiseSpeed);
-        Assert.True(cfg.MaxAssistRiseSpeed >= 170f,
-            "assist cap below the 1-block apex hop — vaults would be ballistically infeasible");
-    }
-
-    [Fact]
     public void VaultCourse_HoldingJump_NeverRocketsPastTheCap()
     {
         // THE historically-rocketing script: run the vault course with jump

@@ -69,8 +69,11 @@ public static class LatticeTracker
         // band does not cap the rise at the x speed: with a fixed 1:1 tilt
         // a running hop reached 19 px against the neutral jump's 60.
         bool planning = dir != 0 || fold.Rising;
+        // While the jump channel lives, the rise actuator is it, and its
+        // ceiling is JumpTopSpeed (plan §11); otherwise the legs' push fade.
+        float riseCeiling = vars.JumpHoldFrames > 0 ? cfg.JumpTopSpeed : cfg.FoldLegPushFadeSpeed;
         Vector2 u = fold.Rising
-            ? Vector2.Normalize(new Vector2(dir * cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, -cfg.FoldLegPushFadeSpeed))
+            ? Vector2.Normalize(new Vector2(dir * cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, -riseCeiling))
             : new Vector2(dir, 0f);
         bool bonk = false;
         int count = planning
@@ -213,6 +216,8 @@ public static class LatticeTracker
             Origin = body.Position, Planning = planning,
             Granted = MovementResources.Available(ctx) & uses,
             DriveCap = driveCap, VRelX = vRelX, FloorVx = floorProbe.SurfaceVelocity.X, VelX = body.Velocity.X,
+            JumpTicks = vars.JumpHoldFrames,
+            JumpRiseCap = cfg.JumpTopSpeed + MathF.Max(0f, -vars.JumpSourceVy),
             T0 = t0, SupportVy = supportVy, WalkSpeed = cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, AirSpeed = cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed,   // the PLAYER's cap: these arcs are flown on air control
         };
         PathTracker.Solve(s, settings, ref policy);
@@ -244,7 +249,8 @@ public static class LatticeTracker
         public float Speed, SupportVy, AirSpeed, WalkSpeed;
         public bool ArcSpeed, Planning;
         public MovementResource Granted;
-        public float DriveCap, VRelX, FloorVx, VelX;
+        public float DriveCap, VRelX, FloorVx, VelX, JumpRiseCap;
+        public int JumpTicks;
         public Vector2 Origin, T0;
 
         public int AddRows(CorrectorScratch s, int H, float dt, int pass, int rowCount)
@@ -299,7 +305,9 @@ public static class LatticeTracker
         {
             bool legs = Granted.Has(MovementResource.Legs);
             float capX = legs ? DriveCap : 0f;
-            float capY = !legs ? 0f : tLast.Y < 0f ? Cfg.FoldLegForce : Cfg.FoldTuckForce;
+            float capY = tLast.Y < 0f
+                ? (JumpTicks > 0 ? Cfg.JumpPushForce : legs ? Cfg.FoldLegForce : 0f)
+                : (legs ? Cfg.FoldTuckForce : 0f);
             capAlong = MathF.Abs(tLast.X) * capX + MathF.Abs(tLast.Y) * capY;
             return Planning;
         }
@@ -313,7 +321,7 @@ public static class LatticeTracker
             // nothing else (plan §3.2). Air control is the state's baseline,
             // not a solver channel.
             int count = CorrectorChannels.BuildFold(s, H, Dir, SupportVy, Granted,
-                DriveCap, VRelX, Cfg.MaxWalkSpeed);
+                DriveCap, VRelX, Cfg.MaxWalkSpeed, JumpTicks, JumpRiseCap);
             // Redirect (left as it is, plan §0): the disc never grows forward
             // speed past min(walk speed, the state's speed) along the route's
             // direction at the body — a deflection keeps |v|, so a 200 px/s

@@ -251,9 +251,12 @@ Each `Update`:
 > only its physical actuators: `LedgePull` and the climb family
 > (`Parkour`/`Mantle`/`ArcJump`, whose trigger still runs the old
 > `ManeuverCorrector` probe) use the grip (`BuildGrip`: lift / pull / hold /
-> brace on the corner); `Dropdown` the feet (`BuildSlide`). Jump launches stay
-> velocity writes, with the tracker riding a jump profile (hybrid;
-> `FoldProfile.Legs` / `ImpulseJump` keep the legs from launching twice).
+> brace on the corner); `Dropdown` the feet (`BuildSlide`). The ground and
+> running jumps are the jump channel (Plans/MOVEMENT_RESOURCE_MODEL.md §11:
+> a solver push created by the press, live while held); the double, wall,
+> ledge and covered jumps stay velocity writes with the tracker riding a
+> jump profile. Channel masks are the resource layer's (`MovementResource`:
+> probes on `EnvironmentContext` ∧ the state's `Uses`).
 > `TerrainCarried` runs with the corrector off.
 
 **Fold states**: `FallingState` (0/0, fallback), `StandingState` (10/10), `CrouchedState` (15/15) — support/locomotion via the ambient fold (above). **Wall**: `WallSlidingState(dir)` (owned contacts; rides `FoldProfile.Fall`).

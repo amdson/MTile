@@ -21,72 +21,49 @@ public class JumpingState : MovementState
 {
     public override int ActivePriority => MovementPriorities.JumpActive;
     public override int PassivePriority => MovementPriorities.JumpPassive;
-    public override MovementResource Uses => MovementResource.Legs | MovementResource.Hands;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
+    // The jump channel replaces the leg servo while it lives (BuildFold);
+    // Drive and Tuck stay the legs' wherever the Legs probe passes.
+    public override MovementResource Uses => MovementResource.Legs | MovementResource.Hands;
 
-    private FloatingSurfaceDistance _source;
-
-    public override void ResetTransient(PhysicsBody body) => _source = Owned(body, SoftContactOwner.JumpSource);
-
+    // The jump is one solver channel (Plans/MOVEMENT_RESOURCE_MODEL.md §11),
+    // created here and nowhere else:
+    //   - created when jump is pressed with the feet planted (the Legs probe)
+    //     — or, out of a hang or a climb at the lip, with a gripped corner in
+    //     the hands (a hands-created jump, §10 q2);
+    //   - after creation not gated on the environment: it is live while the
+    //     button is held, up to MaxJumpHoldTime (vars.JumpHoldFrames), over an
+    //     edge, beside a step or in open air;
+    //   - an upward push capped at JumpPushForce that never takes the rise
+    //     (relative to the surface it left) past JumpTopSpeed: a tap is a short
+    //     hop, each held frame adds about the same height. Nothing writes
+    //     velocity; the solver spends the push along the planned rise.
+    // The state lasts while the channel lives and then while the body still
+    // rises (the coast), so a rising body is not re-caught by Standing.
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         // Buffered jump intent rather than a raw edge: a press up to
         // JumpBufferFrames before landing still fires. Consumed in Enter.
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
-        if (!ctx.TryGetGround(out _))
-        {
-            // Corner push-off (movement_todo #4): a gripped corner is a
-            // legal launch surface — jumping out of a hang (LedgeGrab
-            // releases on an inward/neutral jump press) or out of a
-            // committed vault at the lip, where no ground or wall binds and
-            // the steal would otherwise fizzle. Corners are static terrain:
-            // Enter's sourceVy is 0 and the hold window rides
-            // vars.JumpFromCorner instead of a source FSD.
-            // Stair push-off: a body riding a flight's corner line drifts out
-            // of the ground probe's window for a few frames of every riser;
-            // the stair probe still has the tread under it (see OnStairTread).
-            // Anything else the legs could push off — a floor just out of the probe's
-            // reach, or the lip of a ledge beside the body (JumpSupportChecker).
-            if (!OnStairTread(ctx) && !TryCornerLaunch(ctx, abilities, out _)
-                && !JumpSupportChecker.TryFind(ctx.Body, ctx.Chunks, out _)) return false;
-            return true;
-        }
-        // Hitstun/stun lock-out is enforced centrally via RequiredCapabilities.Jump
-        // (the selection loop drops jump candidates while BlocksJump). Movement
-        // otherwise stays free — it only blocks the cheap vertical-reset option.
-        // No deferral under a low ceiling: the DP plans the rise from under the
+        // Hitstun/stun lock-out is enforced centrally via RequiredCapabilities.Jump.
+        // No deferral under a low ceiling: the planner plans the rise from under the
         // slab — the bevel escape near an edge, an honest bonk deeper in (§7.3, row 3).
-        return true;
+        return HasLaunchSource(ctx, abilities);
     }
 
-    // Is there anything a ground jump could push off — ground, a stair tread, or a
-    // gripped corner? DoubleJumpingState bids only when there is not, so an air jump can
-    // never outbid (or be spent in place of) a ground jump the body is entitled to.
-    // Deliberately not the full precondition: a low ceiling defers the ground jump to
-    // CoveredJumpState, which is still no reason to spend the double jump.
+    // Is there anything a jump could be created from — the feet planted, or a
+    // gripped corner? DoubleJumpingState bids only when there is not, so an air
+    // jump can never outbid (or be spent in place of) a jump the body is entitled to.
     internal static bool HasLaunchSource(EnvironmentContext ctx, PlayerAbilityState abilities)
         => HasGroundSource(ctx) || TryCornerLaunch(ctx, abilities, out _);
 
-    // Standing on something: ground, a stair tread, or a surface/ledge lip in leg
-    // reach (JumpSupportChecker). WallJumpingState yields to it.
-    internal static bool HasGroundSource(EnvironmentContext ctx)
-        => ctx.TryGetGround(out _) || OnStairTread(ctx)
-           || JumpSupportChecker.TryFind(ctx.Body, ctx.Chunks, out _);
-
-    // Climbing a flight, the stair probe (StairClimbState's own continuation) is the
-    // authority on support — not the generic ground probe, whose rest-band window the
-    // corner-line ride leaves for a few frames per riser.
-    private static bool OnStairTread(EnvironmentContext ctx)
-        => ctx.PreviousState(0) is StairClimbState stair
-           && StairChecker.TryFind(ctx.Body, ctx.Chunks, stair.Dir, out _);
+    // Feet planted: the Legs probe. WallJumpingState yields to it.
+    internal static bool HasGroundSource(EnvironmentContext ctx) => ctx.Legs;
 
     // A corner the body's hands hold — the hang, or a climb's lip — within arm's
     // reach counts as a push-off point. Both publish it as sim state in
     // abilities.GrabbedCorner (snapshotted); nothing here reads animation data.
-    // (From the hang LedgeJumpState outbids this launch; the case still matters to
-    // HasLaunchSource, which keeps DoubleJump from bidding while a corner is held.)
-    // Arm's reach: the grip channels' own (CorrectorChannels.GripReach) — one
-    // physical quantity, not a second number for jumping (this was 24 px).
+    // Arm's reach: the grip channels' own (CorrectorChannels.GripReach).
     private const float CornerLaunchReach = CorrectorChannels.GripReach;
     internal static bool TryCornerLaunch(EnvironmentContext ctx, PlayerAbilityState abilities,
                                          out Vector2 corner)
@@ -97,277 +74,73 @@ public class JumpingState : MovementState
                <= CornerLaunchReach * CornerLaunchReach;
     }
 
-    // Lattice engine (Plans/LATTICE_PATH_PLANNER.md §7.3): the jump is a
-    // planned rise, not a fired impulse. Enter sets no velocity, Update
-    // applies no hold force and adds no source constraint; the state hands
-    // the tracker FoldProfile.Jump (hover off, u up-and-along-intent) and the
-    // legs spend themselves along the rising path. The state lasts while the
-    // button is held and the body rises; Falling owns the descent as before.
-    //
-    // ...when there are legs to spend. A planned rise is the LEGS' launch, and
-    // the legs act only with a floor within LegReach (LatticeTracker's tick-0
-    // `near`, the same test). A launch entered with nothing under the feet —
-    // the corner push-off out of a vault, a mantle or an arc jump at the lip,
-    // where the body is airborne beside the step — had no actuator at all: the
-    // body coasted on as if the press never happened (rise 1-6 px against a
-    // ground jump's 41), or fell back into leg reach and launched late. Such a
-    // launch is hybrid instead, like every other jump with nothing to plant
-    // on (DoubleJump, WallJump, LedgeJump, and RunningJump's impulse): the
-    // ref engine's velocity write + hold force, with the tracker riding
-    // FoldProfile.ImpulseJump (legs off — nothing launches it twice). Decided
-    // once, at Enter (vars.JumpImpulse), so a launch never switches mechanism
-    // mid-rise.
-    private static bool LegsInReach(EnvironmentContext ctx) => ctx.LegsInReach;
-
-    // The lattice-native planned rise (above), as opposed to the hybrid impulse.
-    private static bool PlannedRise(in MovementVars vars) => !vars.JumpImpulse;
-
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (PlannedRise(vars))
-        {
-            if (vars.JumpReleased) return false;
-            // The apex ends the jump — once the body has risen (a covered
-            // jump's escape from under a slab begins sideways at vy = 0, and
-            // the rise comes when the path turns up the bevel), after the
-            // first ticks so the legs have had a chance to act on the plan.
-            if (vars.TimeInState >= 2f * ctx.Dt && ctx.Body.Velocity.Y >= 0f
-                && ctx.Body.Position.Y < vars.JumpEntryY - 1f) return false;
-            return vars.JumpFromCorner || TryFindSource(ctx, out _);
-        }
-        if (vars.JumpReleased || vars.TimeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
-        // The jump is anchored to its source surface. Once the body has risen out
-        // of the (wider-than-Standing) probe window, the "relative-to-source" frame
-        // no longer means anything — end the jump and let Falling take over.
-        // Corner launches have no source FSD at all: their frame is the static
-        // corner, valid for the whole hold window.
-        return vars.JumpFromCorner || TryFindSource(ctx, out _);
-    }
+        => vars.JumpHoldFrames > 0 || ctx.Body.Velocity.Y < vars.JumpSourceVy;
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         vars.TimeInState = 0f;
         vars.JumpReleased = !ctx.Input.Space;
         ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
-
-        // Replace any pre-existing FSD (e.g. StandingState's _ground) with our own
-        // source FSD: same kind of contact, just tuned for an airborne body.
+        // Clear any soft contact a previous state held (CoveredJump's, WallSlide's).
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
-        // Planned rise only where the legs can launch it (see LegsInReach).
-        vars.JumpImpulse = !LegsInReach(ctx);
-        if (PlannedRise(vars))
-        {
-            // No source constraint, no impulse: the tracker's legs are the
-            // support and the launch (see PlannedRise).
-            vars.JumpFromCorner = !TryFindSource(ctx, out _);
-            vars.JumpEntryY = ctx.Body.Position.Y;
-            return;
-        }
-        EnsureSource(ctx);
-
-        // Vertical velocity is set *relative* to the source surface, not added to
-        // the body's current vy. Adding to the current velocity produces pathological
-        // launches when the body enters with redirected vy (e.g. mid-Parkour ramp).
-        // With no source at all this is a corner launch — corners are static, so
-        // the frame is the world's.
-        float sourceVy = _source?.SurfaceVelocity.Y ?? 0f;
+        // The channel is created: its top speed is relative to the surface it
+        // left — the floor's own velocity (a rising sprout, a carrier), or a
+        // static corner's zero.
+        float sourceVy = ctx.Legs ? ctx.Floor.SurfaceVelocity.Y : 0f;
         // Terrain-ride handoff: a jump preempting TerrainCarriedState launches in
-        // the CARRIER's frame. The outgoing ride deposits its flow velocity on
-        // exit (same frame as this Enter); take the more-upward of it and any
-        // live contact so carrier momentum survives the standoff gap without
-        // ever double-counting a contact that reports the same surface.
+        // the CARRIER's frame (its flow velocity, deposited on exit this frame).
         if (vars.JumpCarryFrame > 0 && ctx.CurrentFrame - vars.JumpCarryFrame <= 3)
         {
             sourceVy = MathF.Min(sourceVy, vars.JumpCarrySource.Y);
             vars.JumpCarryFrame = 0;
         }
-        ctx.Body.Velocity.Y = sourceVy + MovementConfig.Current.JumpVelocity;
-        vars.JumpFromCorner = _source == null;
+        vars.JumpSourceVy = sourceVy;
+        vars.JumpHoldFrames = vars.JumpReleased ? 1   // a buffered tap still kicks once
+            : Math.Max(1, SimFrames.FromSeconds(MovementConfig.Current.MaxJumpHoldTime, ctx.Dt));
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (_source != null) ctx.Body.Constraints.Remove(_source);
-        _source = null;
-    }
-
-    // Idempotent source-FSD acquisition — see StandingState.EnsureGround. No-op in
-    // normal play (Enter established it); rebuilds after a restore drops it.
-    private void EnsureSource(EnvironmentContext ctx)
-    {
-        if (_source != null) return;
-        if (TryFindSource(ctx, out _source))
-        {
-            // Airborne — no tangential coupling to the source surface, else friction
-            // would dominate the gentle air-drag tangential dynamics.
-            _source.Friction = 0f;
-            Hold(ctx.Body, _source, SoftContactOwner.JumpSource);
-        }
-    }
+        => vars.JumpHoldFrames = 0;
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        if (PlannedRise(vars))
-        {
-            vars.TimeInState += ctx.Dt;
-            if (!ctx.Input.Space) vars.JumpReleased = true;
-            var mo = ctx.Modifiers; var cf = MovementConfig.Current;
-            ctx.Body.AppliedForce = new Vector2(AirControl.Apply(ctx,
-                cf.AirAccel * mo.AirAccel, cf.MaxAirSpeed * mo.MaxAirSpeed, cf.AirDrag * mo.AirDrag), 0f);
-            ApplyAmbient(ctx, ref vars, FoldProfile.Jump);
-            return;
-        }
-        EnsureSource(ctx);
         vars.TimeInState += ctx.Dt;
-        if (!ctx.Input.Space) vars.JumpReleased = true;
-
-        // Refresh the source FSD's pose so the body's vertical motion is tracked
-        // relative to a moving source surface throughout the jump.
-        if (_source != null && TryFindSource(ctx, out var refreshed))
-        {
-            _source.Position        = refreshed.Position;
-            _source.Normal          = refreshed.Normal;
-            _source.MinDistance     = refreshed.MinDistance;
-            _source.SurfaceVelocity = refreshed.SurfaceVelocity;
-        }
-
-        var cfg = MovementConfig.Current;
-        var m   = ctx.Modifiers;
-        var force = Vector2.Zero;
-        force.Y += cfg.JumpHoldForce;
-        if (vars.TimeInState <= ctx.Dt)
-            force.Y += cfg.JumpInitForce;
-
-        force.X = AirControl.Apply(ctx,
-            cfg.AirAccel    * m.AirAccel,
-            cfg.MaxAirSpeed * m.MaxAirSpeed,
-            cfg.AirDrag     * m.AirDrag);
-
-        ctx.Body.AppliedForce = force;
-
-        // Hybrid on the lattice engine (a launch with no legs under it — see
-        // LegsInReach): the impulse above is the launch, the tracker rides the
-        // rising plan using the hands only, as RunningJumpState does.
-        ApplyAmbient(ctx, ref vars, FoldProfile.Jump, MovementResource.Hands);
+        // Released: the channel ends now (the press frame itself always kicks).
+        if (!ctx.Input.Space && vars.TimeInState > ctx.Dt) { vars.JumpReleased = true; vars.JumpHoldFrames = 0; }
+        var mo = ctx.Modifiers; var cf = MovementConfig.Current;
+        ctx.Body.AppliedForce = new Vector2(AirControl.Apply(ctx,
+            cf.AirAccel * mo.AirAccel, cf.MaxAirSpeed * mo.MaxAirSpeed, cf.AirDrag * mo.AirDrag), 0f);
+        // While the channel lives the plan rises (FoldProfile.Jump); after it,
+        // the coast is free flight under the fall profile.
+        if (vars.JumpHoldFrames > 0)
+            ApplyAmbient(ctx, ref vars, FoldProfile.Jump);
+        else
+            ApplyAmbient(ctx, ref vars, FoldProfile.Fall, MovementResource.Air | MovementResource.Hands);
+        if (vars.JumpHoldFrames > 0) vars.JumpHoldFrames--;
     }
-
-    private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
-        => GroundChecker.TryFind(
-            ctx.Body, ctx.Chunks,
-            PlayerCharacter.Radius, PlayerCharacter.Radius,
-            MovementConfig.Current.JumpSourceProbeSlack,
-            ctx.Dt,
-            out source);
 }
 
-public class RunningJumpState : MovementState
+// The running jump: the same jump channel, entered with speed — horizontal
+// speed of at least RunJumpEntrySpeed in the direction being pressed (§0). It
+// differs from JumpingState only in that entry (and its animation identity).
+public class RunningJumpState : JumpingState
 {
     public override int ActivePriority => MovementPriorities.RunningJumpActive;
     public override int PassivePriority => MovementPriorities.RunningJumpPassive;
-    public override MovementResource Uses => MovementResource.Hands;
-    public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
-
-    private FloatingSurfaceDistance _source;
-
-    public override void ResetTransient(PhysicsBody body) => _source = Owned(body, SoftContactOwner.RunningJumpSource);
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
-        if (!ctx.TryGetGround(out _)) return false;
+        if (!ctx.Legs) return false;
         // A running start is a run along a surface. Climbing a flight, speed along the
-        // stairs straddles RunJumpMinSpeed riser by riser, so it would pick between two
+        // stairs straddles the threshold riser by riser, so it would pick between two
         // launches at random — stairs always take JumpingState.
         if (ctx.PreviousState(0) is StairClimbState) return false;
-        if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
-        // Open sky only. The running jump is a blind impulse: anything overhead
-        // within its own rise cuts it short — under a 3-high slab (33 px, one
-        // over the old Headroom gate) it rose 2 px into the underside and died.
-        // Under any ceiling it can reach, JumpingState owns the press (on the
-        // lattice, it plans the walk-out-then-rise escape).
-        if (CeilingChecker.TryFind(ctx.Body, ctx.Chunks, out _, MovementConfig.Current.RunJumpApexRise))
-            return false;
-        return true;
+        int dir = ctx.Intent.CurrentHorizontal;
+        return dir != 0
+            && dir * (ctx.Body.Velocity.X - ctx.Floor.SurfaceVelocity.X) >= MovementConfig.Current.RunJumpEntrySpeed;
     }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (vars.JumpReleased || vars.TimeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
-        return TryFindSource(ctx, out _);
-    }
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        vars.TimeInState = 0f;
-        vars.JumpReleased = !ctx.Input.Space;
-        ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
-
-        ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
-        EnsureSource(ctx);
-
-        // See JumpingState.Enter — vy is relative to source, not additive.
-        float sourceVy = _source?.SurfaceVelocity.Y ?? 0f;
-        ctx.Body.Velocity.Y = sourceVy + MovementConfig.Current.RunJumpVelocity;
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (_source != null) ctx.Body.Constraints.Remove(_source);
-        _source = null;
-    }
-
-    // Idempotent source-FSD acquisition — see JumpingState.EnsureSource.
-    private void EnsureSource(EnvironmentContext ctx)
-    {
-        if (_source != null) return;
-        if (TryFindSource(ctx, out _source))
-        {
-            _source.Friction = 0f;
-            Hold(ctx.Body, _source, SoftContactOwner.RunningJumpSource);
-        }
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        EnsureSource(ctx);
-        vars.TimeInState += ctx.Dt;
-        if (!ctx.Input.Space) vars.JumpReleased = true;
-
-        if (_source != null && TryFindSource(ctx, out var refreshed))
-        {
-            _source.Position        = refreshed.Position;
-            _source.Normal          = refreshed.Normal;
-            _source.MinDistance     = refreshed.MinDistance;
-            _source.SurfaceVelocity = refreshed.SurfaceVelocity;
-        }
-
-        var cfg = MovementConfig.Current;
-        var m   = ctx.Modifiers;
-        var force = Vector2.Zero;
-        force.Y += cfg.RunJumpHoldForce;
-        if (vars.TimeInState <= ctx.Dt)
-            force.Y += cfg.JumpInitForce;
-
-        force.X = AirControl.Apply(ctx,
-            cfg.AirAccel    * m.AirAccel,
-            cfg.MaxAirSpeed * m.MaxAirSpeed,
-            cfg.AirDrag     * m.AirDrag);
-
-        ctx.Body.AppliedForce = force;
-
-        // Hybrid on the lattice engine (like DoubleJump/WallJump): the impulse
-        // above is the launch; the tracker follows the rising plan with the
-        // legs unused (Uses = Hands) so they don't launch it again.
-        ApplyAmbient(ctx, ref vars, FoldProfile.Jump);
-    }
-
-    private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
-        => GroundChecker.TryFind(
-            ctx.Body, ctx.Chunks,
-            PlayerCharacter.Radius, PlayerCharacter.Radius,
-            MovementConfig.Current.JumpSourceProbeSlack,
-            ctx.Dt,
-            out source);
 }
 
 public class DoubleJumpingState : MovementState

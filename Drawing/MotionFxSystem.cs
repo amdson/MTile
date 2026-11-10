@@ -100,8 +100,8 @@ public sealed class MotionFxSystem
         {
             switch (state)
             {
-                case JumpingState:        Effects.JumpDust(_particles, feet, vel.X); break;
                 case RunningJumpState:    Effects.JumpDust(_particles, feet, vel.X, 1.25f); break;
+                case JumpingState:        Effects.JumpDust(_particles, feet, vel.X); break;
                 case LedgeJumpState:      Effects.JumpDust(_particles, feet, vel.X, 0.6f); break;
                 case WallJumpingState wj:
                     Effects.WallJumpPuff(_particles, pos + new Vector2(wj.WallDir * halfW, 4f), wj.WallDir);
