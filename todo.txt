@@ -13,7 +13,6 @@
 - slow down avalanche block generation
 - debug issues with block placement getting truncated when mouse is swept on a long arc around the stage. 
 
-A. a boss that generates a damaging rain/wind that permeates the stage, blowing to the left and doing decent damage and knockback per second. the boss is on the right side, at the very end, with knockback dealing attacks and fairly low health. in addition to the wind and melee attacks, the boss can lob explosives at enemies
 
 M. Open follow-ups from the 2026-11-05 combat frame-data pass (branch combat-frame-data; everything implemented from
    that pass, with its logs and decisions, is in todo_done.txt)

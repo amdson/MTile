@@ -1,6 +1,11 @@
 # Done (moved out of todo.txt on 2026-11-05). Newest at the top of each section; see git history for the commits.
 
 ## Moved 2026-11-10 (audited against the code and git history)
+- [x] 2026-11-10 (06e93f3): wind boss (todo A) - StormcallerEnemy on the "stormcaller" stage. Rooted at the right end
+  of a hall; 15 s SHELTER phase (lane-based leftward gale that tiles block but gusts wear down, ice fields, wind
+  columns) alternating with a 10 s RUN phase (calm, terrain-drilling wind beams, bigger bombs); lobbed storm bombs at
+  range; gale palm / updraft strikes up close throw you back into the wind; 4 HP. StormcallerEnemyTests (15).
+  Original ask: a boss that generates a damaging rain/wind that permeates the stage, blowing to the left and doing decent damage and knockback per second. the boss is on the right side, at the very end, with knockback dealing attacks and fairly low health. in addition to the wind and melee attacks, the boss can lob explosives at enemies
 - [x] 2026-11-10: grab hold 72f -> 120f (FrameData.GrabAction.Active; 1.2 s -> 2 s before the auto-throw).
 - [x] 2026-11-10: Shift+Space no longer dashes while a grab is held (todo 1 + C). InputParser drops the dash chord while
   a Shift-opened LMB press is still down - that Shift belongs to the hold (Grab, and BlockGrab carrying a clod), so
