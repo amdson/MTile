@@ -1,7 +1,8 @@
 # Movement resource model
 
-Status: **proposal.** Implemented: the `qp`/`ref`/`lm` engine removal (commit `e71afd1`) and the
-path-frame change (§8; in the working tree, kept by the user, not yet committed). Started 2026-11-09. Goals in one line each live in
+Status: **built on branch `movement-resource-refactor`** (items 1–8 of the build brief, one commit
+each; see §14 Build log). Earlier: the `qp`/`ref`/`lm` engine removal (commit `e71afd1`) and the
+path-frame change (§8). Started 2026-11-09. Goals in one line each live in
 [todo_movement.txt](../todo_movement.txt); this file holds the detail.
 
 ## 0. Decisions so far
@@ -261,17 +262,20 @@ Stages 5 and 6 depend on answers in §6.
 
 To be re-measured after every stage. Flat-ground values are the ones that must not regress.
 
-| Measure | Now | Target |
-|---|---|---|
-| Walk: first-frame vx / frames to full / stop frames | 49 / 3 / 2 | unchanged |
-| Tap N frames → px | N ± 0.05 | unchanged |
-| Step-up: vx range | 60–63 | unchanged |
-| Ledge walk-off: peak vx | 86 | ≤ walk speed |
-| Running jump: min vx in first 8 frames, direction held | 24 | ≥ takeoff vx |
-| Landing with direction held: min vx / frames to recover | 42 / 15 | separate track |
-| S1 knockback: idle / hold away / hold toward (px) | 3.2 / 22.9 / 22.0 | set by §6 q1 |
-| Hitstun end: vertical pop (px/s) | 44 | 0 |
-| Standing rest height spread (px) | 3.6 | separate track |
+| Measure | Before (210fe11) | After item 8 (trace) | Target |
+|---|---|---|---|
+| Walk: first-frame vx / frames to ≥ 59 / stop frames to < 1 px/s | 49 / 3 / 2 | 48.3 / 4 / 3 | unchanged |
+| Tap N frames → px | N ± 0.05 (1.00 … 9.93) | N + 0.02 … 0.05 (1.02 … 10.04) | unchanged |
+| Step-up: vx range (r2 live config / r1 parkour on) | ≤ 64.9 / 59.0–62.5 | ≤ 60.0 / 59.4–60.0 | unchanged |
+| Ledge walk-off: peak vx | 85.8 | 60.0 (r2) / 60.3 (r1) | ≤ walk speed |
+| Running jump: min vx in first 8 frames, direction held | 24 (51.1 after §8) | 52.4 (Redirect, launch frame) | ≥ takeoff vx (59.9): not met |
+| Landing with direction held: min vx / frames below 59 | 42.9 / 10 | 58.2 / 1 | separate track |
+| S1 knockback, dx at hitstun end: idle / hold away / hold toward (px) | 3.2 / 22.8 / 22.1 | 1.4 / 23.0 / −19.0 (S1 = walk speed: no slip; held input walks) | toward = idle shortest, away longest |
+| Slip from vx 150 (r2 #10), px until ≤ walk: idle / toward / away | — | 11.0 / 12.6 / 23.2 | toward = idle shortest, away longest |
+| Hitstun end: vertical pop (px/s) | 44 | 0 | 0 |
+| Wall approach: frames of braking before contact | 5 | 0 | none |
+| Neutral jump rise: tap / full hold (px) | 23.7 / 33.1 | 12.0 / 31.9 | ≈ 11 / ≈ 33 |
+| Standing rest height spread (px) | 3.6 | not measured | separate track |
 
 ## 6. Open questions
 
@@ -964,3 +968,28 @@ px against +8.5 then +2.4), which is closer to §11's "each held frame adds abou
 height"; full height is 0.7 px lower. Kept as is; not tuned.
 
 Not done: the walk-speed limit on slopes (§10 q1) is still measured along the route tangent.
+
+### Final test run (information only)
+
+`scripts/test-group.py movement corrector`, once, at the last commit: **105 failed, 384 passed,
+9 skipped** (498). The same command at 210fe11: 82 failed, 414 passed (505; seven tests were
+deleted with the code they tested). Newly red (28):
+
+- `DropdownPathTests.HoldDown_At60Hz_SlipsOffAndLandsBelow` ×8 and
+  `ReferencePathTests.Dropdown_ClipDriven_SlipsOffAndLandsNearTheWall`: the first state after the
+  slide is Standing, not Falling. Dropdown ends on the strip probe (its own gate, kept per §3.3)
+  while the C-space Legs probe still has the lip, so Standing takes the body for a frame. This is
+  the strip-versus-C-space disagreement from item 2's table, now visible at the Dropdown exit.
+- `BotManeuverRouteJumpTableTests.Entry_StillLands` ×9: bot jump tables calibrated on the old jump
+  (39 px running jump, 33 px ground jump with the 23.7 px tap).
+- `CorrectorHoleJumpTests.CrouchedInCorridor_DownOverHole_DropsThrough` ×2,
+  `FoldScenarioTests.LipStepOff_FallIsBallistic`,
+  `LatticeScenarioTests.Row19_DiscLiftsOnlyWithinPlantReachOfACorner` ×3,
+  `BounceTests.PlayerDropOntoStone_HighEnoughToBounce_ReboundsUpward`,
+  `PlayerImpactByVelocityTests.Crush_TwentyTileDropHurts_DoubleJumpHeightDoesNot`,
+  `StairAnimationTests.RenderedStairs_PlantTheFeet_WithoutMidFlightPhaseJumps(biped, −1)`,
+  `StandingJitterTests.StackedSproutChain_GrowsUpUnderStandingPlayer_NoYJitter`: not investigated.
+
+Newly green (5): `BallisticPredictorTests` GroundRun ×2 and `Landing_FallOntoFlat_HoldRight_SettlesToHover`,
+`LatticeScenarioTests.Row03_CoveredJump_NearEdge_RisesOutDiagonally`,
+`StairClimbTests.RegularFlight_IsOneStairClimb_AtHoverHeight_NotAChainOfVaults`.
