@@ -734,3 +734,42 @@ What is left of the ledge boost (trace, r2 #2): Standing now lasts to x 225.6 an
 no Drive. The remaining 66.9 is Drive while still Standing on the lip (216 px/s² at f110): the
 plan's route goes down the step, and the walk-speed cap is measured along the route, so the
 descent counts as travel and x is allowed past walk speed. That is the along-path limit, item 6.
+
+### Item 4 — resource table (stage 3)
+
+Change: `MovementResource` (Legs, Hands, Air, Support) with `MovementResources.Available(ctx)`
+from the probes alone and `MovementResources.Of(CorrectionChannel)`, the one channel → resource
+table (Redirect is the one actuator on two anchors: floor = Legs, corner = Hands).
+`FoldProfile.Legs` became `FoldProfile.Uses`; the tracker grants `Available & fold.Uses` and
+`BuildFold` takes that grant and nothing else. Within Hands each channel still needs its own
+surface (a corner for the plant, a face on its side for a shove) — that is the hand probes'
+geometry, not a rewrite. Deleted, one by one:
+- LegServo: `near` per tick and the tracker's `!fold.Legs` override → Legs.
+- Drive: `dir != 0 && near` and the tracker's `near && planning && t0.X != 0` (path-conditioned)
+  → Legs. With no path the axis is zero, so nothing changed where it used to be masked.
+- Tuck: `near` → Legs.
+- Redirect: `near && !Grounded`, the hard-row "feature anchor" rewrite, and the tracker's
+  `(near && !ballistic) || CornerPlant` → Legs, or Hands with a corner in reach.
+- AirLateral, AirVertical, CornerAssist: always masked off by the tracker, so removed from the
+  fold stack (BuildManeuver keeps its own).
+- ContactPush: `Grounded && −vy ≤ 80 → off` → Hands and the state's Uses (Standing does not use
+  Hands). The `dir` sign rule (never push against held input) stays: it reads input, not path.
+- CornerPlant (experiment, cap 0 in the live config): `!Grounded` → Hands.
+
+Uses per profile: Stand/Crouch/Stairs Legs+Support; Fall Air+Hands; Jump Legs+Hands; ImpulseJump
+Hands. (Stage 4 moves Uses onto the states.)
+
+Trace: everything identical except the planned-rise ground jump.
+
+| Neutral jump, rise by hold (trace) | Before | After |
+|---|---|---|
+| 1f / 2f / ≥4f | 23.7 / 30.2 / 33.1 px | 4.4 / 4.4 / 22.4 px |
+
+**This is a known, temporary regression in the ground jump (items 4–6), fixed by item 7.** The
+`Legs` probe includes the rise test (`SpringMaxRiseSpeed` 80 px/s), as §3.1 specifies, so the leg
+servo is now off once the body rises faster than 80 px/s relative to the floor; the planned rise
+relied on the legs pushing to ~173 px/s. Read honestly, the old LegServo mask disagreed with the
+Legs probe (item 2's table), and the planned rise was built on that disagreement. A tap is also
+re-caught by Standing on release (Legs passes again below 80 px/s). §11's jump channel replaces
+the leg servo during a jump, which is the plan's fix; I did not reorder the items. Running jump,
+double jump and the other impulse jumps are unaffected.

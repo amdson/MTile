@@ -25,11 +25,10 @@ public struct FoldProfile
     // (dir, −1)^ — while a jump is held. The launch is then the tracker
     // spending the legs along a rising path; nothing fires an impulse.
     public bool  Rising;
-    // Lattice engine: the leg servo is a permitted channel. Stated per profile
-    // rather than inferred from Hover/Rising: a hybrid jump (the state's own
-    // impulse IS the launch) rises without legs, or they would launch it a
-    // second time on top of the impulse (ImpulseJump).
-    public bool  Legs;
+    // The resources the state asks the solver for (plan §3.3). Channel masks
+    // are (available ∧ Uses); a hybrid jump (the state's own impulse IS the
+    // launch) uses no legs, or they would launch it a second time.
+    public MovementResource Uses;
 
     public static FoldProfile None => default;
 
@@ -44,6 +43,7 @@ public struct FoldProfile
     public static FoldProfile Fall => new()
     {
         Fold = true, Hover = false, Rising = false,
+        Uses = MovementResource.Air | MovementResource.Hands,
         HoverOffset  = MovementConfig.Current.FoldHoverOffset,
         MaxSpeed     = MovementConfig.Current.CorrectorAirSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
@@ -56,7 +56,8 @@ public struct FoldProfile
     // along a rising path before leg reach runs out.
     public static FoldProfile Jump => new()
     {
-        Fold = true, Hover = false, Rising = true, Legs = true,
+        Fold = true, Hover = false, Rising = true,
+        Uses = MovementResource.Legs | MovementResource.Hands,
         HoverOffset = 0f,
         MaxSpeed = MovementConfig.Current.CorrectorAirSpeed, RiseCost = 0f,
     };
@@ -66,7 +67,7 @@ public struct FoldProfile
     // clearance and redirect still act; nothing launches it twice.
     public static FoldProfile ImpulseJump
     {
-        get { var p = Jump; p.Legs = false; return p; }
+        get { var p = Jump; p.Uses = MovementResource.Hands; return p; }
     }
 
     // Standing/Falling: hover ≈ the old spring equilibrium; 1-high ledges ramp
@@ -78,7 +79,7 @@ public struct FoldProfile
         MaxSpeed     = MovementConfig.Current.MaxWalkSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
         Hover        = true,
-        Legs         = true,
+        Uses         = MovementResource.Legs | MovementResource.Support,
     };
 
     // StairClimbState: Standing's profile with the climb priced FREE. On a regular flight
@@ -102,7 +103,7 @@ public struct FoldProfile
         MaxSpeed     = MovementConfig.Current.CrouchMaxWalkSpeed,
         RiseCost     = MovementConfig.Current.CrouchRiseCost,
         Hover        = true,
-        Legs         = true,
+        Uses         = MovementResource.Legs | MovementResource.Support,
     };
 }
 

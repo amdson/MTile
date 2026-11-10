@@ -61,7 +61,6 @@ public static class LatticeTracker
         float dist = floorProbe.Distance;
         bool near     = ctx.LegsInReach;
         float supportVy = floorProbe.SurfaceVelocity.Y;
-        bool ballistic = ctx.Launching;
         bool anchored = ctx.Support(out _);
         // The tracker's samples carry the floor only where the legs reach it.
         if (!near) { floorFound = false; dist = float.PositiveInfinity; }
@@ -204,7 +203,8 @@ public static class LatticeTracker
         var policy = new LatticePolicy
         {
             Cfg = cfg, Fold = fold, Dir = dir, Speed = speed, ArcSpeed = arcSpeed,
-            Origin = body.Position, Near = near, Ballistic = ballistic, Planning = planning,
+            Origin = body.Position, Planning = planning,
+            Granted = MovementResources.Available(ctx) & fold.Uses,
             T0 = t0, SupportVy = supportVy, WalkSpeed = cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, AirSpeed = cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed,   // the PLAYER's cap: these arcs are flown on air control
         };
         PathTracker.Solve(s, settings, ref policy);
@@ -234,7 +234,8 @@ public static class LatticeTracker
         public FoldProfile Fold;
         public int Dir;
         public float Speed, SupportVy, AirSpeed, WalkSpeed;
-        public bool ArcSpeed, Near, Ballistic, Planning;
+        public bool ArcSpeed, Planning;
+        public MovementResource Granted;
         public Vector2 Origin, T0;
 
         public int AddRows(CorrectorScratch s, int H, float dt, int pass, int rowCount)
@@ -257,111 +258,39 @@ public static class LatticeTracker
         // (zero in free air: no actuators there — see the masks below)
         public bool ProgressAuthority(CorrectorScratch s, Vector2 tLast, out float capAlong)
         {
-            float capX = Near ? Cfg.FoldDriveForce : 0f;
-            float capY = !Near ? 0f : tLast.Y < 0f ? Cfg.FoldLegForce : Cfg.FoldTuckForce;
+            bool legs = Granted.Has(MovementResource.Legs);
+            float capX = legs ? Cfg.FoldDriveForce : 0f;
+            float capY = !legs ? 0f : tLast.Y < 0f ? Cfg.FoldLegForce : Cfg.FoldTuckForce;
             capAlong = MathF.Abs(tLast.X) * capX + MathF.Abs(tLast.Y) * capY;
             return Planning;
         }
 
         public int BuildChannels(CorrectorScratch s, int H, int rowCount)
         {
-            var cfg = Cfg; var fold = Fold;
-            bool near = Near, ballistic = Ballistic, planning = Planning;
-            var t0 = T0; float speed = Speed;
+            float speed = Speed;
+            var t0 = T0;
             var ch = s.Problem.Channels;
-            int count = CorrectorChannels.BuildFold(s, H, rowCount, Dir, SupportVy);
-            for (int k = 0; k < H; k++)
-            {
-                s.ChannelMask[2][k] = false;   // CornerAssist: not carried over
-                // No actuators in free air. AirLateral/AirVertical are the qp
-                // fold's flight steering — a second air control without the
-                // state's speed cap, and a vertical nudge that bent a launch
-                // toward a plan that knows nothing of the body's momentum (a
-                // held-right double jump lost a third of its rise). Off the
-                // ground the body follows physics and the state's own air
-                // control; the engine acts where it can push: near the floor
-                // (legs, drive, tuck, redirect) and at a plantable corner.
-                s.ChannelMask[5][k] = false;
-                s.ChannelMask[6][k] = false;
-                // Redirect: wherever the legs are — a plant needs ground to
-                // push against, nothing else. BuildFold's !Grounded gate
-                // (no deflection on supported ticks, so a coast-tracking
-                // solve could not trade a walk's vx for rise) is the qp
-                // objective's worry: this solve maximizes progress along the
-                // path and has no reason to. The push is bounded
-                // (FoldRedirectForce), so a face slows the body, not halts it.
-                // ...but NOT off a surface the body is already leaving. A
-                // plant is a contact: MarkCornerPlants has always said a
-                // hand-plant is a DESCENDING maneuver and that rising ticks
-                // are climb work, the leg servo's domain — the tracker had
-                // dropped that gate along with !Grounded. Without it the disc
-                // spent up to 446 px/s^2 of LIFT on the first frames of every
-                // jump, on flat ground, with no corner within plant reach: a
-                // corner force firing where there is no corner, which reads as
-                // the body floating off the launch. The threshold is the one
-                // StandingState already uses to decide a body is ballistic
-                // rather than supported (a rise no support could author).
-                //
-                // ...and at a plantable corner: the one anchor free air has.
-                // MarkCornerPlants' own gates apply there — descending onto a
-                // corner, or rising into a lip above the center — so the lift
-                // on a flat-ground launch above (no corner in reach) cannot
-                // come back through it. Limits (measured 2026-09-30): the
-                // plant exists only within CornerPlantReach of the lip, ~3
-                // frames before contact for a running jump's arc, and inside
-                // this 5-tick solve the lip's face row is cheaper to meet by
-                // braking x than by dropping under it — so a body arriving
-                // at a corridor mouth still rising hard brakes and wall-slides
-                // anyway. It helps the slow, late contacts.
-                s.ChannelMask[3][k] = cfg.FoldRedirectEnabled
-                    && ((near && !ballistic) || s.CornerPlant[k]);
-                // Legs only where the profile permits them (FoldProfile.Legs).
-                // Fall has none: its plan is a level line at the body's
-                // height, and legs in reach would hold it there — a re-planned
-                // level line, a hard band and the legs make a fixed point (a
-                // wall slide hung 27 px above the floor once the solve
-                // converged); the catch is Standing's, where the legs are. A
-                // hybrid jump (ImpulseJump) has none either: its impulse is
-                // the launch.
-                if (!fold.Legs) s.ChannelMask[0][k] = false;
-                // Drive: along the plan's first segment, wherever the legs
-                // are. BuildFold masks it off at dir == 0 (qp's "no x channel
-                // at station"); on the engine the plan is the authority — a
-                // neutral covered jump's escape begins sideways and needs an
-                // x push (from rest the disc has no radius). Where the plan
-                // follows intent this is the same drive as before; a vertical
-                // first segment turns it off (a neutral jump does not drift).
-                s.ChannelMask[1][k] = near && planning && t0.X != 0f;
-            }
+            // Masks: the resource layer's grant (probes ∧ the state's Uses),
+            // nothing else (plan §3.2). Air control is the state's baseline,
+            // not a solver channel.
+            int count = CorrectorChannels.BuildFold(s, H, Dir, SupportVy, Granted);
+            // Drive along the route's direction at the body (unilateral).
             ch[1].Axis = new Vector2(MathF.Sign(t0.X), 0f);
             ch[1].Unilateral = true;
-            // The disc never grows forward speed past the state's cap (the
-            // maneuver stack's speed-cap principle, movement_todo #5): a
-            // deflection keeps |v|, so a 200 px/s drop rotated at a lip came
-            // out as 200 px/s of walk (the corridor peaked at 168 grounded,
-            // 193 airborne; qp/ref never exceed the 150 air cap). The cap is
-            // the profile's speed where it has one (walk, crouch), else the
-            // air cap; forward is the plan's first direction.
-            ch[3].ForwardAxis = new Vector2(MathF.Sign(t0.X), 0f);
-            // ONE number in every state: a plant never adds forward speed
-            // past the walk's (a slower profile — the crouch — keeps its own).
-            // Per state, the cap moved when the state did: a ledge walk-off
-            // handed the body to Falling's 90 and the lip's plant took it to 86.
-            ch[3].ForwardCap  = t0.X == 0f ? 0f
+            // Redirect (left as it is, plan §0): the disc never grows forward
+            // speed past min(walk speed, the state's speed) along the route's
+            // direction at the body — a deflection keeps |v|, so a 200 px/s
+            // drop rotated at a lip came out as 200 px/s of walk.
+            ch[2].ForwardAxis = new Vector2(MathF.Sign(t0.X), 0f);
+            ch[2].ForwardCap  = t0.X == 0f ? 0f
                 : MathF.Min(WalkSpeed, float.IsFinite(speed) ? speed : AirSpeed);
-            // ...parametrized as a force (see CorrectionSolver.Project: the
-            // same disc, in Δv/dt) so its lever is commensurate with the other
-            // channels' — as a Δv lever, active on every near tick, it
-            // inflated every variable's step bound and starved the legs and
-            // drive — and priced like the legs (BuildFold's ε weight makes a
-            // deflection free, which makes it the solver's first choice for
-            // every band violation: rotating the walk's velocity, shedding it).
-            ch[3].Lever  = LeverKind.Force;
-            ch[3].Weight = ch[0].Weight;
-            // (Band and speed rows are Reference rows, so BuildFold's corner /
-            // redirect feature activation does not see them — the disc had
-            // been "planting" against the band in free air, holding a 4-tile
-            // fall to 27 px/s.)
+            // ...parametrized as a force (CorrectionSolver.Project: the same
+            // disc, in Δv/dt) so its lever is commensurate with the other
+            // channels', and priced like the legs (an ε weight made a
+            // deflection free — the solver's first choice for every band
+            // violation, shedding the walk's velocity).
+            ch[2].Lever  = LeverKind.Force;
+            ch[2].Weight = ch[0].Weight;
             return count;
         }
     }

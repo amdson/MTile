@@ -44,48 +44,28 @@ public static class CorrectorChannels
                                                // MaxGroundEngageVnRel ± this window
     private const float RedirectEpsilon = 1e-6f;         // uniqueness regularizer, not a knob
 
-    // The restricted standing/fold channels, built from the coast — masks and
-    // velocity-conditioned caps are frozen per solve (tick 0 uses the body's
-    // actual state, so applied perturbations are always truly admissible).
-    // Returns the channel count.
-    //
-    // Anti-autopilot structure: no force channel may push AGAINST the held
-    // direction on the solver's behalf. Drive and AirLateral are unilateral
-    // along intent while a direction is held — so hard clearance rows can never
-    // recruit a slow-down-to-fit, and held momentum is never braked.
-    // CornerAssist is lift-only for the same reason. The redirect disc may
-    // still shed speed — passivity is its physical semantics (a deflection off
-    // planted feet) — and exists only near the ground.
-    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir,
-                                float supportVy = 0f)
+    // The fold channel stack (the lattice tracker's). Masks come from the
+    // resource layer and nothing else (Plans/MOVEMENT_RESOURCE_MODEL.md §3.2):
+    // `granted` = the resources available (probes) AND used by the state.
+    // Within Hands, each channel needs its own surface (a corner to plant on,
+    // a face on its side to shove off) — the hand probes' geometry, held in
+    // s.CornerPlant / s.ContactPushLeft / s.ContactPushRight. No channel reads
+    // the path. Caps stay velocity-conditioned on the held state.
+    // Returns the channel count; slots: 0 LegServo, 1 Drive, 2 Redirect,
+    // 3 Tuck, then CornerPlant (if enabled) and ContactPush L/R (if enabled).
+    public static int BuildFold(CorrectorScratch s, int n, int dir, float supportVy, MovementResource granted)
     {
         var cfg = MovementConfig.Current;
         float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
-        float CornerForce = cfg.FoldCornerForce, TuckForce = cfg.FoldTuckForce;
+        float TuckForce = cfg.FoldTuckForce;
         float VPushMax = cfg.FoldLegPushFadeSpeed;
         // The rise ceiling every lifting channel obeys: the fastest rise a
-        // DELIBERATE jump can author (ground, running or double — derived from
-        // the jump tuning, not a knob). FoldLegPushFadeSpeed is an authority
-        // fade, not a speed limit; at 400 it never binds, so a corner-served
-        // channel could hand a jump rise no jump could produce.
-        //
-        // SUPPORT-RELATIVE (BACKLOG 5.8, extended to the caps): the ceiling is
-        // what a jump can author IN THE LAUNCH FRAME. On a static floor this
-        // collapses to the old absolute form; launching off a surface that is
-        // itself rising (an avalanche crest, a growing sprout at ~110 px/s),
-        // the frame's own rise raises the world-frame ceiling — otherwise the
-        // legs treat inherited carrier momentum as overshoot and a ride jump
-        // peaks at exactly the flat-ground jump's speed. The landing-catch
-        // fade below stays ABSOLUTE on purpose: the descending gate is what
-        // the impact-materials spec is tuned against.
+        // DELIBERATE jump can author, support-relative (BACKLOG 5.8): the
+        // frame's own rise raises the world-frame ceiling on a rising floor.
         float frameRise = MathF.Max(0f, -supportVy);
         float RiseMax = cfg.MaxAssistRiseSpeed + frameRise;
-        Span<bool> near = stackalloc bool[BallisticPredictor.MaxHorizon];
-        for (int k = 0; k < n; k++)
-        {
-            float dist = s.Samples[k].FloorY - s.Samples[k].Pos.Y;
-            near[k] = !float.IsPositiveInfinity(s.Samples[k].FloorY) && dist <= LegReach;
-        }
+        bool legs  = granted.Has(MovementResource.Legs);
+        bool hands = granted.Has(MovementResource.Hands);
         var ch = s.Problem.Channels;
 
         // Dev/test capability-probing harness: limited channel sets, hot-swapped
@@ -97,7 +77,7 @@ public static class CorrectorChannels
             case "redirect-traction":
                 for (int k = 0; k < n; k++)
                 {
-                    s.ChannelMask[0][k] = near[k];
+                    s.ChannelMask[0][k] = legs;
                     s.ChannelMask[1][k] = true;
                 }
                 ch[0] = new ChannelDef { Id = CorrectionChannel.Drive,
@@ -113,8 +93,8 @@ public static class CorrectorChannels
             case "legs-only":
                 for (int k = 0; k < n; k++)
                 {
-                    s.ChannelMask[0][k] = near[k];
-                    s.ChannelMask[1][k] = near[k];
+                    s.ChannelMask[0][k] = legs;
+                    s.ChannelMask[1][k] = legs;
                     float sepL = MathF.Max(0f, -s.Samples[k].Vel.Y);
                     s.ChannelCap[0][k] = LegForce * Math.Clamp(1f - sepL / VPushMax, 0f, 1f);
                 }
@@ -130,114 +110,51 @@ public static class CorrectorChannels
         // "full": the whole stack.
         for (int k = 0; k < n; k++)
         {
-            s.ChannelMask[0][k] = near[k];    // LegServo
-            s.ChannelMask[1][k] = dir != 0 && near[k];   // Drive — no x channel at
-                                              // station (friction is baseline; a
-                                              // two-sided x channel would let hard
-                                              // rows recruit a dodge-brake)
-            // Redirect: near the ground AND in dynamic motion — the disc is a
-            // plant-and-deflect: it needs ground to push against (no redirect
-            // in flight) but must not serve steady SUPPORTED ticks (rotating a
-            // supported walk's speed into rise is the leg servo's job done
-            // wrong — it eats vx to climb). A convex corner within hand reach
-            // (MarkCornerPlants) is a plant anchor too — the cave-mouth lip.
-            s.ChannelMask[3][k] = cfg.FoldRedirectEnabled
-                                  && (near[k] || s.CornerPlant[k]) && !s.Samples[k].Grounded;
-            s.ChannelMask[4][k] = near[k];    // Tuck: legs pulling the body down
-                                              // onto the floor (ducks, drop-below-
-                                              // hover) — a ground verb too
-            s.ChannelMask[5][k] = dir != 0 && !near[k];  // AirLateral
-            s.ChannelMask[6][k] = !near[k];   // AirVertical
+            s.ChannelMask[0][k] = legs;                                   // LegServo
+            s.ChannelMask[1][k] = legs;                                   // Drive
+            s.ChannelMask[2][k] = cfg.FoldRedirectEnabled                 // Redirect: floor or corner
+                                  && (legs || (hands && s.CornerPlant[k]));
+            s.ChannelMask[3][k] = legs;                                   // Tuck
 
             // LegServo cap fades on BOTH velocity senses:
-            //  - rising: authority tapers to zero at VPushMax — the servo can
-            //    push, but never past it;
+            //  - rising: authority tapers to zero at VPushMax;
             //  - descending: the landing-catch authority dies at
-            //    MaxGroundEngageVnRel, mirroring the old FSD engagement gate.
-            //    Legs cushion an ordinary landing entirely; a plunge past the
-            //    gate hits the tiles RAW — which is what the whole
-            //    impact-materials spec (bounce/break by drop height) is tuned
-            //    against. Softening plunges would silently retune terrain
-            //    damage as a side effect of locomotion.
+            //    MaxGroundEngageVnRel — a plunge past the gate hits the tiles
+            //    RAW, which the impact-materials spec is tuned against.
             float sep = MathF.Max(0f, -(s.Samples[k].Vel.Y - supportVy));
             float catchScale = Math.Clamp(
                 (cfg.MaxGroundEngageVnRel + CatchFadeBand - s.Samples[k].Vel.Y)
                     / CatchFadeBand, 0f, 1f);
             s.ChannelCap[0][k] = LegForce * Math.Clamp(1f - sep / VPushMax, 0f, 1f) * catchScale;
         }
-        // CornerAssist: active near obstacle features — ticks within ±2 of any
-        // HARD row (proxy for "close to the corner").
-        for (int k = 0; k < n; k++) s.ChannelMask[2][k] = false;
-        for (int j = 0; j < rowCount; j++)
-        {
-            if (s.Rows[j].HingeScale < 1f || s.Rows[j].Reference) continue;
-            for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
-                s.ChannelMask[2][k] = true;
-        }
-        // Feature-anchored redirect (cave-mouth entry): a reachable OBSTACLE
-        // surface is a plantable anchor too — floors aren't special. Any
-        // hard row except a floor's (row normals are axis-aligned tile
-        // faces: walls push ±x, lip undersides push +y, floors push −y and
-        // stay the near-mask's business) marks a surface the body can plant
-        // against; airborne ticks adjacent to one get the plant-and-deflect
-        // disc even with no floor underfoot, so the body can hand-plant a
-        // lip corner or wall face and deflect down-along-face into an
-        // opening. Supported ticks stay masked off (the hover ride under a
-        // slab is Grounded), and SkipSoftHorizontal still bars soft-x
-        // service — this adds plant surfaces, not autopilot.
-        if (cfg.FoldRedirectEnabled)
-            for (int j = 0; j < rowCount; j++)
-            {
-                if (s.Rows[j].HingeScale < 1f || s.Rows[j].Reference || s.Rows[j].Normal.Y < -0.3f) continue;
-                for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
-                    if (!s.Samples[k].Grounded) s.ChannelMask[3][k] = true;
-            }
 
         var intent = dir == 0 ? new Vector2(1f, 0f) : new Vector2(dir, 0f);
-        ch[0] = new ChannelDef {   // LegServo: strong, up-only, near ground
+        ch[0] = new ChannelDef {   // LegServo: strong, up-only
             Id = CorrectionChannel.LegServo,
             Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], RiseCap = RiseMax,
             ActiveMask = s.ChannelMask[0] };
-        ch[1] = new ChannelDef {   // Drive: along intent only, capped, near ground
+        ch[1] = new ChannelDef {   // Drive: along intent only, capped
             Id = CorrectionChannel.Drive,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = dir != 0,
             Axis = intent, Cap = WalkForce, ActiveMask = s.ChannelMask[1] };
-        ch[2] = new ChannelDef {   // CornerAssist: weak LIFT near features (never x)
-            Id = CorrectionChannel.CornerAssist,
-            Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
-            Axis = new Vector2(0f, -1f), Cap = CornerForce, ActiveMask = s.ChannelMask[2],
-            RiseCap = RiseMax, SkipSoftHorizontal = true };
-        ch[3] = new ChannelDef {   // Redirect: Thales disc, NEAR-GROUND, free.
-                                   // Serves hard rows and soft VERTICAL references
-                                   // (ducks, catches); never the soft x-progress
-                                   // rows (a passive air-brake along intent).
-                                   // PlantServes: the ONLY channel wall-face
-                                   // (PlantOnly) rows may recruit — and only at
-                                   // corner-plant/near ticks per its mask.
+        ch[2] = new ChannelDef {   // Redirect: Thales disc, a bounded plant-and-deflect.
+                                   // Serves hard rows and soft VERTICAL references;
+                                   // never the soft x-progress rows. PlantServes: the
+                                   // only channel wall-face (PlantOnly) rows may recruit.
             Id = CorrectionChannel.Redirect,
             Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon, Redirect = true,
-            Cap = cfg.FoldRedirectForce,   // a bounded push, not an instant halt
-            // The corner force obeys the launch's ceiling. The disc adds no
-            // energy, but at a corner it converts forward speed into rise —
-            // and unbounded that outran the legs' own ceiling, so a jump near
-            // a corner picked up rise no jump can author.
+            Cap = cfg.FoldRedirectForce,
+            // The corner force obeys the launch's ceiling: at a corner the disc
+            // converts forward speed into rise, and unbounded that outran the
+            // legs' own ceiling.
             RiseCap = RiseMax,
-            ActiveMask = s.ChannelMask[3], SkipSoftHorizontal = true, PlantServes = true };
-        ch[4] = new ChannelDef {   // Tuck: down-only, near ground (legs pull down)
+            ActiveMask = s.ChannelMask[2], SkipSoftHorizontal = true, PlantServes = true };
+        ch[3] = new ChannelDef {   // Tuck: down-only (legs pull down)
             Id = CorrectionChannel.Tuck,
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
-            Axis = new Vector2(0f, 1f), Cap = TuckForce, ActiveMask = s.ChannelMask[4] };
-        ch[5] = new ChannelDef {   // AirLateral: flight steering along intent
-            Id = CorrectionChannel.AirLateral,
-            Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
-            Axis = intent, Cap = cfg.FoldAirLateralForce, ActiveMask = s.ChannelMask[5] };
-        ch[6] = new ChannelDef {   // AirVertical: tiny two-sided nudge in flight
-            Id = CorrectionChannel.AirVertical,
-            Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
-            Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6],
-            SkipSoftHorizontal = true };
-        return AddContactPush(s, n, dir, AddCornerPlant(s, n, 7));
+            Axis = new Vector2(0f, 1f), Cap = TuckForce, ActiveMask = s.ChannelMask[3] };
+        return AddContactPush(s, n, dir, hands, AddCornerPlant(s, n, hands, 4));
     }
 
     // Contact push: an airborne hand shove off an exposed wall face or lower
@@ -251,7 +168,7 @@ public static class CorrectorChannels
     // it never adds rise or brakes a fall. The solve decides when — the
     // wall rows and the path band — never a centering rule. Cap 0 → omitted.
     private const float ContactPushWeight = 0.05f;   // AirLateral's price
-    private static int AddContactPush(CorrectorScratch s, int n, int dir, int slot)
+    private static int AddContactPush(CorrectorScratch s, int n, int dir, bool hands, int slot)
     {
         float cap = MovementConfig.Current.FoldContactPushForce;
         if (cap <= 0f) return slot;
@@ -266,17 +183,10 @@ public static class CorrectorChannels
             Lever = LeverKind.Force, Weight = ContactPushWeight, AxisOnly = true, Unilateral = true,
             SkipSoftHorizontal = true,
             Axis = new Vector2(1f, 0f), Cap = cap, ActiveMask = s.ChannelMask[slot + 1] };
-        // Airborne, or LEAVING the floor (rising faster than support could
-        // push — the launch ticks, StandingState's ballistic rule): a jump's
-        // hands are free from its first tick, and a lip the rise will meet
-        // 5 ticks out is only correctable if the shove can start then.
-        float launch = MovementConfig.Current.SpringMaxRiseSpeed;
         for (int k = 0; k < n; k++)
         {
-            if (s.Samples[k].Grounded && -s.Samples[k].Vel.Y <= launch)
-            { s.ChannelMask[slot][k] = s.ChannelMask[slot + 1][k] = false; continue; }
-            s.ChannelMask[slot][k]     = s.ContactPushLeft[k]  && dir <= 0;
-            s.ChannelMask[slot + 1][k] = s.ContactPushRight[k] && dir >= 0;
+            s.ChannelMask[slot][k]     = hands && s.ContactPushLeft[k]  && dir <= 0;
+            s.ChannelMask[slot + 1][k] = hands && s.ContactPushRight[k] && dir >= 0;
         }
         return slot + 2;
     }
@@ -320,12 +230,12 @@ public static class CorrectorChannels
     // ticks (MarkCornerPlants) — no axis, no unilateral rule, no soft-row skip.
     // Deliberately breaks the anti-autopilot structure to see what a corner
     // plant could do with arbitrary authority. Cap 0 → channel omitted.
-    private static int AddCornerPlant(CorrectorScratch s, int n, int slot)
+    private static int AddCornerPlant(CorrectorScratch s, int n, bool hands, int slot)
     {
         float cap = MovementConfig.Current.FoldCornerPlantForce;
         if (cap <= 0f) return slot;
         for (int k = 0; k < n; k++)
-            s.ChannelMask[slot][k] = s.CornerPlant[k] && !s.Samples[k].Grounded;
+            s.ChannelMask[slot][k] = hands && s.CornerPlant[k];
         s.Problem.Channels[slot] = new ChannelDef {
             Id = CorrectionChannel.CornerPlant,
             Lever = LeverKind.Force, Weight = 0.05f,
@@ -424,7 +334,9 @@ public static class CorrectorChannels
             Id = CorrectionChannel.AirVertical,
             Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6] };
-        return AddCornerPlant(s, n, 7);
+        int count = AddCornerPlant(s, n, true, 7);
+        for (int k = 0; k < n && count > 7; k++) s.ChannelMask[7][k] &= !s.Samples[k].Grounded;
+        return count;
     }
 
     // Hand-plant reach for convex-corner redirect anchors (body center →
