@@ -130,6 +130,15 @@ public class ZzzMovementResponse2
             Solo(sb, $"6 fall onto block corner at x=220 from x={sx} (R held, vy 200)", Rows(E, E, E, E, E, Line(20, 70), F),
                 new Vector2(sx, 5 * T - 20.5f - 50f), InputScript.Always(R), 50, 0, 50, new Vector2(20f, 200f));
 
+        // 7. Wall approach: two-high wall at x=220, R held. Plan §12: no braking before contact.
+        Solo(sb, "7 wall approach: two-high wall at x=220 (R held)", Rows(E, E, E, E, Line(20, 70), Line(20, 70), F),
+            new Vector2(150, restY), new InputScript().For(40, None).Forever(R), 130, 96, 116);
+
+        // 8. Neutral jump under a low ceiling (11.5 px of headroom), held 8f. Plan §12: no braking before the bonk.
+        Solo(sb, "8 neutral jump under a low ceiling (row 1 solid), Space 8f at f40", Rows(E, F, E, E, E, E, F),
+            new Vector2(150, restY), new InputScript().For(40, None).For(8, new PlayerInput { Space = true }).Forever(None),
+            90, 38, 66);
+
         // ── Post-hit ─────────────────────────────────────────────────────────
         // Attacker at x=200 facing +x runs the ground string (tap every 5f from f13); victim 24px ahead.
         var flat = new[] { E, E, E, E, E, E, F };

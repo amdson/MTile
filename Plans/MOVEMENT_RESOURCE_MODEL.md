@@ -636,3 +636,41 @@ Consequences, accepted:
 - The four acceleration-only actions start having an effect for the first time.
 
 Hitstun's own write of this modifier is removed with the rest of the hitstun scalars (§9).
+
+## 14. Build log
+
+Implementation of the refactor on branch `movement-resource-refactor` (from `combat-frame-data`
+210fe11), one commit per item. Traces: `ZzzMovementResponse` (r1, code-default config, parkour on)
+and `ZzzMovementResponse2` (r2, live config). "Trace" below means measured in those; "code" means
+read from the code only.
+
+### Item 1 — wall rows follow the plan (§12)
+
+Change: `PathTracker.Solve` keeps a copy of the terrain rows and, on every bead pass, keeps a row
+only if the route point at the row's tick satisfies it against the tile itself (the row's depth
+less the `LatticePathPlanner.Clearance` margin it was inflated by — the same margin the planner
+keeps its nodes clear by). With no polyline (a refused plan with nothing past its seed, or no
+route) the route is the body's ray along the fallback tangent (intent). The test uses the row's own
+plane, which is the source tile's facet at that tick; the tile index itself is not needed. Applies
+to every `PathTracker` user (lattice and the authored clip followers).
+
+Decision not in the plan: the no-polyline case. The first build used beads only, and the wall
+approach still braked for 2 frames, because at the wall the plan collapses to its seed (count 1,
+Refused) and the tracker has no polyline. Taking the route there as the intent ray is what the
+tracker's own comment says the regime means ("drive along intent … walk into it").
+
+| Measure (trace) | Before | After |
+|---|---|---|
+| Wall approach (r2 #7): first braking frame / vx at contact | f101, 5 frames before contact / 31.8 | none / 59.6 (stops on contact) |
+| Low-ceiling neutral jump (r2 #8): rise speed at the bonk | tuck brakes from f42, 73.8 px/s at contact | no tuck, 172.8 px/s at contact |
+| Flat walk, taps, jumps, running jump, landings, hits | — | identical |
+| Bumpy corridor (`BumpyTunnelSpeedTests`, trace only) | 115.0 px/s, final x 600.4 | same (sub-0.1 px differences) |
+
+Got worse / changed:
+- With parkour on (r1, code defaults), parkour no longer triggers on the one-high step, bump and
+  pit (accepted in §0). The step-up is now walked by the solver: vx 54.2–67.0 (was 59.0–62.5 under
+  parkour). The 1-wide bump is walked over level (the collision hull clears it by 2.3 px; legs are
+  virtual). The 1-wide pit now shows the ledge boost (vx 87.6), which parkour had been hiding.
+- r2 #6 (fall onto a block corner from x=213): Mantle no longer fires; the body is caught on the
+  block by the legs (Drive peaks 1559 px/s², vx 63.8) and then rises slowly onto the top.
+- §12.4's third case (a refused plan whose last segment runs along a wall) was not constructed.

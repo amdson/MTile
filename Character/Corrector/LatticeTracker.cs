@@ -177,20 +177,16 @@ public static class LatticeTracker
         bool arcSpeed = fold.Hover && havePath && float.IsFinite(speed);
 
         // ── The walls: clearance rows from the free rollout ──────────────
-        // The path is guidance; the tiles are the constraint. Without these
-        // the QP knew only the band — symmetric, so lagging a bend toward
-        // the wall cost no more than lagging it toward free space — and the
-        // body hit every corner of the bumpy corridor (10 stalls; the ref
-        // engine, whose QP has clearance rows, hits none). The rows are the
-        // swept body's penetrations along the free rollout, hard, with tile
-        // normals: the tuck/legs take their gradient from the actual face,
-        // and the redirect can plant against it. All faces (the DP already
-        // decided bonk-vs-route, so no anti-autopilot filter). Built once;
-        // every bead pass starts from them. Margin = the engine's one
-        // clearance number (LatticePathPlanner.Clearance), not
-        // CorrectorMargin: that 2 px is the 10-tick ballistic engines'
-        // prediction insurance, and on both faces of a 22 px corridor it
-        // asked for 23.2 — the floor and ceiling rows could never both hold.
+        // The path is guidance; the tiles are the constraint: the band lets
+        // the body stray half a cell from a route the planner keeps only
+        // LatticePathPlanner.Clearance clear of tiles, so without these the
+        // body hit every corner of the bumpy corridor. The rows are the swept
+        // body's penetrations along the free rollout, hard, with tile normals.
+        // PathTracker.Solve keeps a row only while the route itself satisfies
+        // it (Plans/MOVEMENT_RESOURCE_MODEL.md §12): the planner decides which
+        // tiles are avoided, and a wall or ceiling the plan runs into (a
+        // refused plan's ray, a jump's column) is hit, not braked for.
+        // Margin = the engine's one clearance number.
         int wallRows = ClearanceConstraintBuilder.Build(ctx.Chunks, body.Polygon, s.DeliverySamples, H,
             LatticePathPlanner.Clearance, ClearanceConstraintBuilder.DefaultDeepViolation, s.Rows, out _,
             verticalFacesOnly: false);

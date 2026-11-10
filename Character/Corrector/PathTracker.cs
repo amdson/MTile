@@ -126,22 +126,62 @@ public static class PathTracker
         bool hoverLine = !havePath && !float.IsNaN(set.HoverLineY);
         bool arcSpeed  = havePath && float.IsFinite(set.ArcSpeedCap);
         var pr = s.Problem;
+        // The terrain rows as built. Each pass keeps only those the route
+        // itself satisfies (plan §12): the planner decided which tiles are
+        // avoided; a wall or ceiling the route runs into is hit, not braked
+        // for.
+        Span<ClearanceRow> wall = stackalloc ClearanceRow[set.WallRows];
+        for (int i = 0; i < set.WallRows; i++) wall[i] = s.Rows[i];
+        Span<Vector2> beadQ = stackalloc Vector2[H];
+        Span<Vector2> beadT = stackalloc Vector2[H];
+        Span<float>   beadS = stackalloc float[H];
 
         for (int pass = 0; pass < BeadPasses; pass++)
         {
-            int rowCount = set.WallRows;
             Vector2 tLast = set.FallbackTangent, qLast = set.Origin;
-            float sPrev = set.ArcStart;
+            if (havePath)
+            {
+                float sPrev = set.ArcStart;
+                for (int T = 0; T < H; T++)
+                {
+                    Vector2 delta = pass == 0 ? Vector2.Zero : s.TrackDelta[T];
+                    float sT = MathF.Max(sPrev, ProjectArc(s.BeadVerts, s.BeadArc, nv, s.DeliverySamples[T].Pos + delta));
+                    sPrev = sT;
+                    PointAt(s.BeadVerts, s.BeadArc, nv, sT, out beadQ[T], out beadT[T]);
+                    beadS[T] = sT;
+                }
+                tLast = beadT[H - 1]; qLast = beadQ[H - 1];
+            }
+            else
+            {
+                // No polyline (a refused plan with nothing beyond its seed, or
+                // no route): the route is the body's own ray along the
+                // fallback tangent — intent, which is what the tracker drives
+                // along in that regime. Zero tangent: the route is the body.
+                var ft = set.FallbackTangent;
+                for (int T = 0; T < H; T++)
+                {
+                    float a = MathF.Max(0f, Vector2.Dot(s.DeliverySamples[T].Pos - set.Origin, ft));
+                    beadQ[T] = set.Origin + ft * a;
+                }
+            }
+
+            int rowCount = 0;
+            for (int i = 0; i < wall.Length; i++)
+            {
+                int k = Math.Clamp(wall[i].Tick, 0, H - 1);
+                if (RouteSatisfies(wall[i], beadQ[k] - s.DeliverySamples[k].Pos))
+                    s.Rows[rowCount++] = wall[i];
+            }
+
             for (int T = 0; T < H; T++)
             {
                 Vector2 delta = pass == 0 ? Vector2.Zero : s.TrackDelta[T];
                 Vector2 pT = s.DeliverySamples[T].Pos + delta;
                 if (havePath)
                 {
-                    float sT = MathF.Max(sPrev, ProjectArc(s.BeadVerts, s.BeadArc, nv, pT));
-                    sPrev = sT;
-                    PointAt(s.BeadVerts, s.BeadArc, nv, sT, out var q, out var t);
-                    tLast = t; qLast = q;
+                    float sT = beadS[T];
+                    var q = beadQ[T]; var t = beadT[T];
                     var n = new Vector2(-t.Y, t.X);
                     // e: the FREE rollout's offset from the bead along n
                     // (rows measure Δp from the free rollout).
@@ -272,6 +312,17 @@ public static class PathTracker
         body.AppliedForce += s.TickDv[0] / dt;
         s.Ledger.Record(s.Problem, s.Z, s.RowPush, s.Samples, dt);
     }
+
+    // Does the route point (the bead the body follows at the row's tick)
+    // satisfy a terrain row? The row asks the body to move Depth along Normal
+    // from the free rollout; routeOffset = bead − free-rollout sample at that
+    // tick. Tested against the tile itself (the row's depth less the margin
+    // it was inflated by): the planner keeps its nodes that same margin
+    // clear, so a route that goes around a tile always passes, and one whose
+    // extension enters the tile (a refused plan's ray into a wall, a jump's
+    // column into a ceiling) fails.
+    public static bool RouteSatisfies(in ClearanceRow row, Vector2 routeOffset)
+        => Vector2.Dot(routeOffset, row.Normal) >= row.Depth - LatticePathPlanner.Clearance;
 
     // Arc length of the nearest point on the polyline (vertices 0..nv−1,
     // last segment extended as a ray — the honest carry past the end — and
