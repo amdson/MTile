@@ -937,3 +937,30 @@ Not met / worse:
   launch frame (−453, the Legs probe still passes at vy 0). Redirect is out of scope (§0).
 - Running jump lands 13 px shorter (lower apex, and air control holds vx at `MaxAirSpeed` 54 after
   the launch-frame loss).
+
+### Item 8 — along-path law (stage 6)
+
+What item 6 already did: braking at zero input is Drive answering a speed row (no friction term),
+and walk speed bounds what is added, never asks for braking; reversing intent brakes through the
+same progress row and Drive that accelerate.
+
+Change here: one along-path speed per intent, in every fold state. The path's speed is the
+profile's ground speed (walk, or the crouch's crawl) under the `MaxWalkSpeed` modifier, and for a
+rising plan the magnitude of the intent vector (walk along, the rise ceiling up). It is enforced by
+the same along-route rows in every state; the air profiles' x-only speed rows are deleted, and
+Fall/Jump no longer carry `CorrectorAirSpeed` (90), which is deleted (the live JSON keeps its
+now-unread key; one test's bound now names the old 90 inline).
+
+| Measure (trace) | Before (item 7) | After |
+|---|---|---|
+| Neutral jump rise by hold 1/2/3/4/5/6/7 f (px) | 12.0 / 20.5 / 22.9 / 25.3 / 27.7 / 30.2 / 32.6 | 12.0 / 16.3 / 19.8 / 22.9 / 26.0 / 29.4 / 31.9 |
+| Running jump rise by hold 1/2/4/7 f (px) | 13.0 / 19.3 / 25.3 / 32.5 | 11.9 / 19.1 / 24.9 / 32.4 |
+| Everything else in r1/r2 | — | within 0.2 px / 0.5 px/s (wall approach peak 59.9 → 60.0) |
+
+Read: the jump's rise is now bounded both by the channel's own top speed and by the along-route
+row at the same number, and with the row in play the solver approaches the top speed over ~5
+frames instead of one. The per-frame increments became more even (+4.2, 3.6, 3.0, 3.1, 3.4, 2.4
+px against +8.5 then +2.4), which is closer to §11's "each held frame adds about the same
+height"; full height is 0.7 px lower. Kept as is; not tuned.
+
+Not done: the walk-speed limit on slopes (§10 q1) is still measured along the route tangent.

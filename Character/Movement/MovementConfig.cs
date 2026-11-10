@@ -21,12 +21,6 @@ public class MovementConfig
     // was an oversight that made the air the fastest way to travel. This caps what air
     // control can ADD; a jump keeps the lateral speed it took off with (AirControl).
     public float MaxAirSpeed { get; set; } = 54f;
-    // The fold's own horizontal drive budget in the air (AmbientCorrector's air profiles):
-    // the vault / lip-step-off dynamics were designed at 90 and misbehave under the
-    // player's 54 cap (LipStepOff kicked upward, the predictor-vs-sim coast diverged).
-    // Kept at the old value. MaxAirSpeed is the PLAYER's cap, and the lattice plans the
-    // player's air segments with THAT (a plan flown at 90 on 54 of control overshoots).
-    public float CorrectorAirSpeed { get; set; } = 90f;
     // Descent-only gravity scale (todo L): gravity x this while airborne and moving DOWN,
     // full gravity on the way up, so jump height and every take-off calibration are
     // untouched and only the fall is floatier - a floaty body is easier to juggle and a

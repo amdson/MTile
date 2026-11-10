@@ -61,20 +61,26 @@ public static class LatticeTracker
         if (!near) { floorFound = false; dist = float.PositiveInfinity; }
 
         // ── The plan ─────────────────────────────────────────────────────
-        // The x speed cap: the profile's, under the walk or air modifier.
-        float speed = fold.MaxSpeed * (fold.Hover ? ctx.Modifiers.MaxWalkSpeed : ctx.Modifiers.MaxAirSpeed);   // MaxSpeed is CorrectorAirSpeed for air profiles
         // u is intent: along dir, and up as well while a jump is held. A
         // launch's tilt is the direction the actuators produce — the legs'
         // ceiling (the push fade speed) up, the walk speed along — so the
         // band does not cap the rise at the x speed: with a fixed 1:1 tilt
         // a running hop reached 19 px against the neutral jump's 60.
         bool planning = dir != 0 || fold.Rising;
+        // One along-path speed per intent, in every state (plan stage 6): the
+        // walk (or the crouch's crawl) under the MaxWalkSpeed modifier along
+        // dir, and while a jump plans a rise, the intent vector's magnitude
+        // (the walk along, the rise ceiling up).
         // While the jump channel lives, the rise actuator is it, and its
         // ceiling is JumpTopSpeed (plan §11); otherwise the legs' push fade.
         float riseCeiling = vars.JumpHoldFrames > 0 ? cfg.JumpTopSpeed : cfg.FoldLegPushFadeSpeed;
         Vector2 u = fold.Rising
             ? Vector2.Normalize(new Vector2(dir * cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, -riseCeiling))
             : new Vector2(dir, 0f);
+        float ground = fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
+        float speed = fold.Rising
+            ? new Vector2(dir * ground, riseCeiling).Length()
+            : ground;
         bool bonk = false;
         int count = planning
             ? s.Lattice.Solve(ctx.Chunks, body.Polygon, body.Position, body.Velocity,
@@ -165,11 +171,10 @@ public static class LatticeTracker
             }
         }
         float yHover = floorY - fold.HoverOffset;
-        // Grounded profiles (those that hover) cap the SPEED along the path
-        // (a walk speed is a SPEED: capping x let a body on a 45° bevel run
-        // at |v| = 141 — a staircase came out as a chain of hops); air
-        // profiles cap x only — see LatticePolicy.AddRows.
-        bool arcSpeed = fold.Hover && havePath && float.IsFinite(speed);
+        // The SPEED along the path is capped, in every state (motion splits
+        // along the path versus across it, never x versus y; a walk speed
+        // capped in x let a body on a 45° bevel run at |v| = 141).
+        bool arcSpeed = havePath && float.IsFinite(speed);
         // Walk speed is the most the legs can ADD, never a demand to brake
         // (plan §9.1): a body already moving faster along the route than the
         // state's speed is capped at its own speed, so no speed row asks the
@@ -212,7 +217,7 @@ public static class LatticeTracker
         };
         var policy = new LatticePolicy
         {
-            Cfg = cfg, Fold = fold, Dir = dir, Speed = speed, ArcSpeed = arcSpeed,
+            Cfg = cfg, Fold = fold, Dir = dir, Speed = speed,
             Origin = body.Position, Planning = planning,
             Granted = MovementResources.Available(ctx) & uses,
             DriveCap = driveCap, VRelX = vRelX, FloorVx = floorProbe.SurfaceVelocity.X, VelX = body.Velocity.X,
@@ -247,7 +252,7 @@ public static class LatticeTracker
         public FoldProfile Fold;
         public int Dir;
         public float Speed, SupportVy, AirSpeed, WalkSpeed;
-        public bool ArcSpeed, Planning;
+        public bool Planning;
         public MovementResource Granted;
         public float DriveCap, VRelX, FloorVx, VelX, JumpRiseCap;
         public int JumpTicks;
@@ -255,21 +260,6 @@ public static class LatticeTracker
 
         public int AddRows(CorrectorScratch s, int H, float dt, int pass, int rowCount)
         {
-            // Air profiles keep the x-only cap: an air speed bounds lateral
-            // steering, while the vertical is gravity and the legs' launch
-            // ("as fast as possible" along a rising path).
-            // Like the arc cap, a limit on what is added, never a demand to
-            // brake: a body already faster along intent keeps its own speed.
-            if (!ArcSpeed && Dir != 0 && float.IsFinite(Speed))
-            {
-                float cap = MathF.Max(Speed, Dir * VelX);
-                for (int T = 0; T < H; T++)
-                {
-                    float along = (s.DeliverySamples[T].Pos.X - Origin.X) * Dir;
-                    s.Rows[rowCount++] = new ClearanceRow
-                        { Tick = T, Normal = new Vector2(-Dir, 0f), Depth = along - cap * (T + 1) * dt, HingeScale = 1f, Reference = true };
-                }
-            }
             // Zero input commands zero speed relative to the floor (§9.2 step
             // 2): braking is asked for by a row like everything else, and the
             // Drive channel's braking side answers it. The commanded motion is

@@ -67,7 +67,7 @@ public class SpeedInvariantTests(ITestOutputHelper output)
         // landing (62-65 at a 60 cap), which was invisible under the old 95 ceiling.
         // The corrector's own air budget (CorrectorAirSpeed, 90) is the vault course's
         // driving speed; the player's MaxAirSpeed is lower (0.9x walk) and caps only input.
-        float vxAir     = MathF.Max(MathF.Max(cfg.MaxAirSpeed, cfg.CorrectorAirSpeed), cfg.MaxWalkSpeed) * 1.1f + 5f;
+        float vxAir     = MathF.Max(MathF.Max(cfg.MaxAirSpeed, 90f /* the deleted CorrectorAirSpeed */), cfg.MaxWalkSpeed) * 1.1f + 5f;
         const float Eps = 0.5f;
 
         var violations = new List<string>();
