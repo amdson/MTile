@@ -427,7 +427,6 @@ public class CombatState
     // directional-influence (DI) budget; raise to give victims more say.
     public const float HitstunAccelScale    = 0.15f;
     public const float HitstunDragScale     = 0.2f;
-    public const float HitstunFrictionScale = 0.3f;
 
     // `hitstunSecondsOverride` ≥ 0 replaces the impulse-derived window — used by
     // weak multi-hit attacks (hold-slashes) whose tiny impulse should still carry

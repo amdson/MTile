@@ -53,7 +53,15 @@ public static class CorrectorChannels
     // the path. Caps stay velocity-conditioned on the held state.
     // Returns the channel count; slots: 0 LegServo, 1 Drive, 2 Redirect,
     // 3 Tuck, then CornerPlant (if enabled) and ContactPush L/R (if enabled).
-    public static int BuildFold(CorrectorScratch s, int n, int dir, float supportVy, MovementResource granted)
+    // Drive (plan §9): two-way in x with ONE cap (`driveCap`: grip or slip,
+    // times the WalkAccel modifier), built as two unilateral sides so each can
+    // stop adding at walk speed: a side's cap is at most the room left this
+    // tick between the body's speed relative to the floor in its direction
+    // and `walk` — the legs cannot add past walk speed — while the other side
+    // (braking) keeps the cap. Not conditioned on the path: the axis is x,
+    // the mask is the Legs grant.
+    public static int BuildFold(CorrectorScratch s, int n, int dir, float supportVy, MovementResource granted,
+                                float driveCap, float vRelX, float walk)
     {
         var cfg = MovementConfig.Current;
         float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
@@ -115,6 +123,7 @@ public static class CorrectorChannels
             s.ChannelMask[2][k] = cfg.FoldRedirectEnabled                 // Redirect: floor or corner
                                   && (legs || (hands && s.CornerPlant[k]));
             s.ChannelMask[3][k] = legs;                                   // Tuck
+            s.ChannelMask[4][k] = legs;                                   // Drive, −x side
 
             // LegServo cap fades on BOTH velocity senses:
             //  - rising: authority tapers to zero at VPushMax;
@@ -128,16 +137,15 @@ public static class CorrectorChannels
             s.ChannelCap[0][k] = LegForce * Math.Clamp(1f - sep / VPushMax, 0f, 1f) * catchScale;
         }
 
-        var intent = dir == 0 ? new Vector2(1f, 0f) : new Vector2(dir, 0f);
         ch[0] = new ChannelDef {   // LegServo: strong, up-only
             Id = CorrectionChannel.LegServo,
             Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], RiseCap = RiseMax,
             ActiveMask = s.ChannelMask[0] };
-        ch[1] = new ChannelDef {   // Drive: along intent only, capped
+        ch[1] = new ChannelDef {   // Drive, +x side
             Id = CorrectionChannel.Drive,
-            Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = dir != 0,
-            Axis = intent, Cap = WalkForce, ActiveMask = s.ChannelMask[1] };
+            Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(1f, 0f), Cap = DriveSideCap(driveCap, walk - vRelX), ActiveMask = s.ChannelMask[1] };
         ch[2] = new ChannelDef {   // Redirect: Thales disc, a bounded plant-and-deflect.
                                    // Serves hard rows and soft VERTICAL references;
                                    // never the soft x-progress rows. PlantServes: the
@@ -154,8 +162,17 @@ public static class CorrectorChannels
             Id = CorrectionChannel.Tuck,
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, 1f), Cap = TuckForce, ActiveMask = s.ChannelMask[3] };
-        return AddContactPush(s, n, dir, hands, AddCornerPlant(s, n, hands, 4));
+        ch[4] = new ChannelDef {   // Drive, −x side (the same cap)
+            Id = CorrectionChannel.Drive,
+            Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(-1f, 0f), Cap = DriveSideCap(driveCap, walk + vRelX), ActiveMask = s.ChannelMask[4] };
+        return AddContactPush(s, n, dir, hands, AddCornerPlant(s, n, hands, 5));
     }
+
+    // A Drive side's cap: the one cap, but never more than adds `room` px/s
+    // (the speed left before walk speed in that direction) this tick.
+    private static float DriveSideCap(float cap, float room)
+        => MathF.Max(0f, MathF.Min(cap, room / Simulation.FixedDt));
 
     // Contact push: an airborne hand shove off an exposed wall face or lower
     // corner within hand reach (MarkContactPush). Two unilateral lateral

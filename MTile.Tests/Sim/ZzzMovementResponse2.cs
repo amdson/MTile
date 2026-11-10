@@ -139,6 +139,23 @@ public class ZzzMovementResponse2
             new Vector2(150, restY), new InputScript().For(40, None).For(8, new PlayerInput { Space = true }).Forever(None),
             90, 38, 66);
 
+        // 9. Flat walk then release: the stop (plan §9: braking is Drive answering a zero-speed row).
+        Solo(sb, "9 flat: R x30 from f40, then release", Rows(E, E, E, E, E, E, F), new Vector2(150, restY),
+            new InputScript().For(40, None).For(30, R).Forever(None), 80, 38, 76);
+
+        // 10. Slip: a standing body handed vx = +150 (a knockback's speed) with input idle / away (R) /
+        // toward (L). Plan §9: idle = toward (shortest), away longest; slide ends at walk speed, then grip.
+        sb.AppendLine("## 10 slip from vx=150 on flat: x travelled until |vx| <= 60, and after 40f, by input");
+        foreach (var (nm, inp) in new[] { ("idle", None), ("away", R), ("toward", new PlayerInput { Left = true }) })
+        {
+            var s10 = new StringBuilder();
+            Solo(s10, "", Rows(E, E, E, E, E, E, F), new Vector2(150, restY), InputScript.Always(inp), 41, 0, 41, new Vector2(150f, 0f));
+            var lines = s10.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            int slipEnd = Array.FindIndex(lines, l => l.Contains("vx=") && MathF.Abs(float.Parse(l.Substring(l.IndexOf("vx=") + 3, 6))) <= 60.5f);
+            sb.AppendLine($"  {nm,-7} slip ends f{slipEnd - 1} at {lines[Math.Max(1, slipEnd)].Substring(2, 14)}; f40 {lines[^1].Substring(2, 40)}");
+        }
+        Solo(sb, "10 detail: slip from vx=150, idle", Rows(E, E, E, E, E, E, F), new Vector2(150, restY), InputScript.Always(None), 14, 0, 14, new Vector2(150f, 0f));
+
         // ── Post-hit ─────────────────────────────────────────────────────────
         // Attacker at x=200 facing +x runs the ground string (tap every 5f from f13); victim 24px ahead.
         var flat = new[] { E, E, E, E, E, E, F };

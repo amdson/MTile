@@ -803,3 +803,77 @@ put on WallSlide or the ledge states: their own gates are stricter, and the Hand
 grip input (the ledge states' corner lives in `PlayerAbilityState`, which the probes cannot see).
 
 Trace: r1 and r2 identical to item 4 (both run in separate processes from here on).
+
+### Item 6 — two-way Drive, grip and slip, external control, §13 (§9 + stage 5 + §13)
+
+Change:
+- **Drive** is two-way in x with one cap, built as two unilateral sides (+x, −x) so that each side
+  can be limited to the room left before walk speed in its own direction this tick
+  (`DriveSideCap`): the legs cannot add speed past walk speed, and the braking side keeps the
+  whole cap. Axis x, mask = the Legs grant; no axis, mask or cap from the path.
+- **Grip and slip**: relative to the floor, |vx| ≤ walk speed grips (Drive cap `FoldDriveForce`),
+  above it slips (Drive cap `SlipDriveForce`, new key, 400, plus `SlipFriction`, new key, 400,
+  passive and input-independent, in `FoldBaseline` so the free rollout predicts it; it never
+  decelerates below walk speed). Walk speed for grip is the config's (a property of the feet).
+- **Zero input** commands zero speed relative to the floor: per tick, a row bounds the
+  displacement in the direction of motion by the profile "speed falls to zero at Drive's cap and
+  stays there" (at rest, both sides: hold station). `FoldBaseline`'s friction term is deleted.
+- **Walk speed is a limit on what is added, never a demand to brake**: the arc-speed cap is
+  max(state speed, current speed along the route tangent at the body) and the air x-cap is
+  max(state speed, current vx along intent). Measured along the route tangent, as before (§10 q1,
+  still open).
+- **External control**: the tracker's early return on `PreserveExternalVelocity` is deleted;
+  hitstun's `WalkAccel` and `GroundFriction` scalars are deleted (`HitstunFrictionScale` gone).
+  Hitstun still scales air accel and air drag, and still sets `PreserveExternalVelocity`, which is
+  now read only by the climb probe's coast (`BallisticPredictor`) and the animation layer.
+  Tumble and Grabbed are unchanged (they never ran the tracker). **The guard pushback slide window
+  (`GuardPushSlideSeconds`) is left as it is**: it now only does what hitstun does in the air plus
+  the animation flag; on the ground the shove is grip and slip like any other velocity.
+- **§13**: `MovementModifiers.GroundFriction` is deleted (and its four action writes);
+  `WalkAccel` scales Drive's cap only (grip and slip alike); `AirAccel` already scaled air
+  control. The climb probe's coast lost its mirror of the friction term.
+- Solver: `ClearanceConstraintBuilder.MaxEvents` 32 → 48 so the zero-speed rows fit (the tracker
+  now reserves 5H+1 rows for its own rows, so up to 22 terrain rows instead of 16). The solver kept
+  a per-channel 32-bit skip mask over row indices; it is now 64-bit (rows ≥ 32 aliased otherwise).
+
+Decisions not in the plan:
+- The zero-speed row's shape. A plain "displacement ≤ 0 from now" row stops in 4–5 frames and
+  adds 0.3 px to every tap: at dt² leverage the hinge trades the unfixable first-tick violation
+  against later ticks. Two-sided rows on the braking profile made Drive's two sides fight across
+  the horizon. One-sided rows on the profile give the numbers below.
+- Drive as two unilateral sides with a per-tick "room to walk speed" cap. A plain cut at walk speed
+  let the running-jump landing take vx 57 → 92 (one frame of full Drive just under walk, with the
+  arc cap no longer braking). The room cap is the exact form of "the legs cannot add past walk".
+- Weak numbers: 400 / 400 (`SlipDriveForce` / `SlipFriction`), starting values only.
+
+| Measure (trace) | Before (item 5) | After |
+|---|---|---|
+| Walk: first-frame vx / steady vx | 48.3 / 59.6 | 48.3 / 59.9 |
+| Stop from walk (r2 #9): vx by frame | 59.6 → 0 in 2 frames (friction) | 59.9 → 18.2 → 3.9 → 0.8 → 0.2 |
+| Tap 1 / 4 / 10 f (px) | 1.00 / 3.97 / 9.93 | 1.02 / 4.04 / 10.04 |
+| Flat walk Drive / Redirect at steady state (§10 q4) | +38 / −37 every frame | 0 / 0 |
+| Step-up (r1 D1, parkour on) vx range | 59.0–62.5 | 59.4–60.0 |
+| Ledge walk-off peak vx (r1 D5 / r2 #2) | 66.9 / 66.9 | 60.3 / 60.0 |
+| Landing with R held (r2 #4): min vx / frames below 59 | 42.9 / 10 | 58.2 / 1 |
+| Running jump (r1 G): mid-air vx min/max, downrange | 51.1/59.5, 58.5 px | 57.4/62.6, 52.9 px |
+| S1, flat: dx at hitstun end idle / away / toward | 3.2 / 22.8 / 22.1 | 1.4 / 23.0 / −19.0 |
+| Hitstun end vertical pop | 44 px/s | 0 |
+| Slip from vx 150 (r2 #10): px until ≤ walk, idle / toward / away | — | 11.0 / 12.6 / 23.2 |
+| Bumpy corridor (`BumpyTunnelSpeedTests`) | 115.0 px/s, x 600.4 | same |
+
+Reading the S1 row: S1 delivers exactly walk speed (60), so it never slips; the victim grips and
+stops within ~2 frames, and with a direction held simply walks (hence −19 holding toward). The
+knockback part is the idle number. The ordering the plan asks for (idle = toward shortest, away
+longest) is measured on the slip scenario instead, where the hit exceeds walk speed. S1-S2-S3 now
+lands all three hits on a victim holding away (it used to drift out of S3's reach): hp 4.45 →
+3.85, peak |vx| 119 → 162.
+
+Got worse, or not met:
+- **Stopping is slower than before** (3–4 frames to < 1 px/s instead of 2) and taps are 0.02–0.11
+  px long. Cause, traced: on the release frame Drive reaches 2067 of its 3000 cap (Redirect adds
+  434). At force leverage (dt²) the hinge weight 1e6 against Drive's weight 0.05 settles with the
+  first-tick row 0.14 px unmet. That is the solver's existing pricing of Drive against a hard row;
+  per the rules I did not retune weights. It also applies to the weak slip Drive (335 of 400).
+- Ground jump is still the item-4 regression (fixed in item 7).
+- `PreserveExternalVelocity` is no longer what keeps a hit from being braked on the ground; any
+  remaining reader that assumed so was not audited beyond the two listed.

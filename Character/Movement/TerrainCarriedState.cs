@@ -323,7 +323,7 @@ public class TerrainCarriedState : MovementState
         var cfg = MovementConfig.Current;
         var m = ctx.Modifiers;
         int dir = ctx.Intent.CurrentHorizontal;
-        float cap = cfg.GroundFriction * m.GroundFriction;
+        float cap = cfg.GroundFriction;
         float targetX = target.X + dir * cfg.MaxAirSpeed * m.MaxAirSpeed;
         force.X += Math.Clamp((targetX - ctx.Body.Velocity.X) / ctx.Dt, -cap, cap);
         if (MathF.Abs(target.Y) > 1f)

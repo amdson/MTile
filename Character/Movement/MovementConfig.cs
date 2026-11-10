@@ -293,6 +293,14 @@ public class MovementConfig
     // speed (px/s) — see CorrectorChannels for each channel's role.
     public float FoldLegForce                   { get; set; } = 6000f;
     public float FoldDriveForce                 { get; set; } = 3000f;
+    // Grip and slip (Plans/MOVEMENT_RESOURCE_MODEL.md §9): above walk speed
+    // relative to the floor the feet slip. Slipping, Drive's one cap drops to
+    // SlipDriveForce, and SlipFriction — passive, input-independent, part of
+    // the baseline the solver predicts from — decelerates the body toward walk
+    // speed. Their ratio is the victim's influence on a knockback slide.
+    // Starting values, to be tuned with the knockback retune.
+    public float SlipDriveForce                 { get; set; } = 400f;
+    public float SlipFriction                   { get; set; } = 400f;
     public float FoldCornerForce                { get; set; } = 1500f;
     public float FoldTuckForce                  { get; set; } = 3600f;
     public float FoldLegPushFadeSpeed           { get; set; } = 400f;

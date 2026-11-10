@@ -222,13 +222,13 @@ public static class CorrectionSolver
         for (int d = 0; d < BallisticPredictor.MaxHorizon; d++) { levV[d] = (d + 1) * p.Dt; levF[d] = levV[d] * p.Dt; }
 
         // Row-class compatibility per (channel, row) as a bitmask — R is capped
-        // at ClearanceConstraintBuilder.MaxEvents = 32, so one uint per channel.
+        // at ClearanceConstraintBuilder.MaxEvents ≤ 64, so one ulong per channel.
         // Bit set = this channel takes no hinge gradient from that row.
-        Span<uint> skip = stackalloc uint[MaxChannels];
+        Span<ulong> skip = stackalloc ulong[MaxChannels];
         for (int c = 0; c < C; c++)
         {
-            uint m = 0;
-            for (int j = 0; j < R; j++) if (Skips(p.Channels[c], p.Rows[j])) m |= 1u << j;
+            ulong m = 0;
+            for (int j = 0; j < R; j++) if (Skips(p.Channels[c], p.Rows[j])) m |= 1ul << j;
             skip[c] = m;
         }
 
@@ -275,7 +275,7 @@ public static class CorrectionSolver
             int kMax = Math.Min(p.Rows[j].Tick, H - 1);
             for (int c = 0; c < C; c++)
             {
-                if ((skip[c] & (1u << j)) != 0) continue;
+                if ((skip[c] & (1ul << j)) != 0) continue;
                 var ch = p.Channels[c];
                 int kd = kind[c];
                 float ax = AxisFactor(ch, p.Rows[j].Normal);
@@ -297,7 +297,7 @@ public static class CorrectionSolver
         for (int c = 0; c < C; c++)
         {
             var ch = p.Channels[c];
-            uint sk = skip[c];
+            ulong sk = skip[c];
             int kd = kind[c];
             for (int k = 0; k < H; k++)
             {
@@ -306,7 +306,7 @@ public static class CorrectionSolver
                 for (int j = 0; j < R; j++)
                 {
                     if (k > p.Rows[j].Tick) continue;
-                    if ((sk & (1u << j)) != 0) continue;
+                    if ((sk & (1ul << j)) != 0) continue;
                     float lever = Lev(kd, p.Rows[j].Tick, k, levV, levF) * AxisFactor(ch, p.Rows[j].Normal);
                     L += 2f * p.HingeWeight * p.Rows[j].HingeScale * lever * rowS[j];
                 }
@@ -345,7 +345,7 @@ public static class CorrectionSolver
             for (int c = 0; c < C; c++)
             {
                 var ch = p.Channels[c];
-                uint sk = skip[c];
+                ulong sk = skip[c];
                 int kd = kind[c];
                 ulong a = act[c];
                 for (int k = 0; k < H; k++)
@@ -371,7 +371,7 @@ public static class CorrectionSolver
                         if (slack[j] <= 0f) continue;
                         var row = p.Rows[j];
                         if (k > row.Tick) continue;
-                        if ((sk & (1u << j)) != 0) continue;
+                        if ((sk & (1ul << j)) != 0) continue;
                         float lever = Lev(kd, row.Tick, k, levV, levF);
                         var push = hs2[j] * slack[j] * lever * row.Normal;
                         g -= push;

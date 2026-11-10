@@ -90,47 +90,34 @@ public class StandingState : MovementState
         ApplyAmbient(ctx, ref vars, FoldProfile.Stand);
     }
 
-    // Shared fold-state baseline, mirrored tick-for-tick by the predictor's
-    // grounded branch: gravity hold iff supported (see Update above), plus
-    // station friction at no input — the fold body never physically touches
-    // the floor, so SurfaceContact.Friction can't brake it; this term is that
-    // friction re-expressed as feedforward (the old "no-input → braking"
-    // role). Hitstun scales it down through Modifiers.GroundFriction exactly
-    // as it scaled the old contact friction.
+    // Shared fold-state baseline: the gravity hold (the Support probe's
+    // strength) and, while the feet slip, sliding friction. Braking at zero
+    // input is no longer a baseline term: it is the Drive channel's braking
+    // side, asked for by a zero-speed row (Plans/MOVEMENT_RESOURCE_MODEL.md §9).
     internal static Vector2 FoldBaseline(EnvironmentContext ctx)
     {
-        // Supported = floor within reach AND not rising beyond what support
-        // could push (SpringMaxRiseSpeed). Without the rise gate, a body flung
-        // upward while near a floor (a pop-out) keeps the hold — zero gravity —
-        // and rides its launch indefinitely.
-        //
-        // The rise is SURFACE-RELATIVE (BACKLOG 5.8): a body carried up by a
-        // rising floor (a sprout growing under it, ~110 px/s — faster than the
-        // 80 px/s gate) is standing in the floor's frame, not launched. The
-        // absolute form declared it ballistic, dropped the hold, and left raw
-        // contact resolution to bulldoze the body up against full gravity —
-        // the sprout-lift jitter. Static floors have zero SurfaceVelocity and
-        // collapse to the old form. Entry (IsStandingGround) already measured
-        // relative; support now agrees with it.
-        // The hold FADES across the spring's old support range: full inside
-        // the rest band (2R ≈ the old FSD MinDistance), zero at SupportReach
-        // (the Support probe's payload). A body floating above hover gets
-        // mostly-real gravity.
         if (!ctx.Support(out float holdScale) || holdScale <= 0f) return Vector2.Zero;
-        var floorVel = ctx.Floor.SurfaceVelocity;
         var force = new Vector2(0f, -ctx.Gravity.Y * holdScale);
-        if (ctx.Intent.CurrentHorizontal == 0 && ctx.Dt > 0f)
-        {
-            // Station friction brakes toward the SURFACE's tangential velocity,
-            // not toward world-zero — the contact-scoped frame (BACKLOG 5.7's
-            // tangential carry, applied to the feedforward friction term): a
-            // floor sliding sideways under planted feet carries the body with
-            // it instead of the friction fighting the ride.
-            float cap = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
-            float vxRel = ctx.Body.Velocity.X - floorVel.X;
-            force.X = Math.Clamp(-vxRel / ctx.Dt, -cap, cap) * holdScale;
-        }
+        force.X = SlipFriction(ctx);
         return force;
+    }
+
+    // Grip and slip (§9.1): body speed relative to the floor at or below walk
+    // speed, the feet grip; above it they slip, and the floor decelerates the
+    // body toward walk speed with a weak passive friction, whatever the input.
+    // Never reads combat state. Walk speed here is the legs' (config), not the
+    // state's request: it is a property of the feet.
+    internal static bool Slipping(EnvironmentContext ctx, out float vRel)
+    {
+        vRel = ctx.Body.Velocity.X - ctx.Floor.SurfaceVelocity.X;
+        return ctx.Legs && MathF.Abs(vRel) > MovementConfig.Current.MaxWalkSpeed;
+    }
+
+    internal static float SlipFriction(EnvironmentContext ctx)
+    {
+        if (!Slipping(ctx, out float vRel) || ctx.Dt <= 0f) return 0f;
+        float over = MathF.Abs(vRel) - MovementConfig.Current.MaxWalkSpeed;
+        return -MathF.Sign(vRel) * MathF.Min(MovementConfig.Current.SlipFriction, over / ctx.Dt);
     }
 }
 

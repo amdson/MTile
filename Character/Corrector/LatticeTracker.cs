@@ -46,11 +46,6 @@ public static class LatticeTracker
         var body = ctx.Body;
         float dt = ctx.Dt;
         if (s == null || dt <= 0f) return;
-        if (ctx.Modifiers.PreserveExternalVelocity)             // knockback: never fought
-        {
-            vars.AmbientPrevDv = Vector2.Zero; vars.AmbientChannelPrev = default;
-            return;
-        }
         int H = Math.Min(PathTracker.Horizon, BallisticPredictor.MaxHorizon);
 
         // ── The body's situation (masks and caps are frozen from it) ─────
@@ -172,6 +167,17 @@ public static class LatticeTracker
         // at |v| = 141 — a staircase came out as a chain of hops); air
         // profiles cap x only — see LatticePolicy.AddRows.
         bool arcSpeed = fold.Hover && havePath && float.IsFinite(speed);
+        // Walk speed is the most the legs can ADD, never a demand to brake
+        // (plan §9.1): a body already moving faster along the route than the
+        // state's speed is capped at its own speed, so no speed row asks the
+        // solver to shed it. Drive itself cannot add past walk speed (its
+        // per-side cut in BuildFold). The speed is measured along the route
+        // tangent at the body, as the arc rows measure it (§10 q1, open).
+        float arcCap = arcSpeed ? MathF.Max(speed, Vector2.Dot(body.Velocity, t0)) : float.PositiveInfinity;
+        // Grip and slip (§9.1): Drive's one cap, weak while the feet slip,
+        // scaled by the action modifier WalkAccel (§13; Drive only).
+        bool slipping = StandingState.Slipping(ctx, out float vRelX);
+        float driveCap = (slipping ? cfg.SlipDriveForce : cfg.FoldDriveForce) * ctx.Modifiers.WalkAccel;
 
         // ── The walls: clearance rows from the free rollout ──────────────
         // The path is guidance; the tiles are the constraint: the band lets
@@ -187,14 +193,15 @@ public static class LatticeTracker
         int wallRows = ClearanceConstraintBuilder.Build(ctx.Chunks, body.Polygon, s.DeliverySamples, H,
             LatticePathPlanner.Clearance, ClearanceConstraintBuilder.DefaultDeepViolation, s.Rows, out _,
             verticalFacesOnly: false);
-        wallRows = Math.Min(wallRows, ClearanceConstraintBuilder.MaxEvents - (3 * H + 1));
+        // Reserve: band 2H + arc H + speed rows 2H (zero input) + progress.
+        wallRows = Math.Min(wallRows, ClearanceConstraintBuilder.MaxEvents - (5 * H + 1));
 
         // ── Sliding beads: outer passes of project → rows → solve ────────
         var settings = new PathTrackSettings
         {
             H = H, Dt = dt, Origin = body.Position, VertexCount = nv, ArcStart = arcStart,
             Band = band,
-            ArcSpeedCap = arcSpeed ? speed : float.PositiveInfinity,
+            ArcSpeedCap = arcCap,
             HoverLineY  = hoverColumnRows ? yHover : float.NaN,
             FallbackTangent = u,
             WallRows = wallRows,
@@ -205,6 +212,7 @@ public static class LatticeTracker
             Cfg = cfg, Fold = fold, Dir = dir, Speed = speed, ArcSpeed = arcSpeed,
             Origin = body.Position, Planning = planning,
             Granted = MovementResources.Available(ctx) & uses,
+            DriveCap = driveCap, VRelX = vRelX, FloorVx = floorProbe.SurfaceVelocity.X, VelX = body.Velocity.X,
             T0 = t0, SupportVy = supportVy, WalkSpeed = cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, AirSpeed = cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed,   // the PLAYER's cap: these arcs are flown on air control
         };
         PathTracker.Solve(s, settings, ref policy);
@@ -236,6 +244,7 @@ public static class LatticeTracker
         public float Speed, SupportVy, AirSpeed, WalkSpeed;
         public bool ArcSpeed, Planning;
         public MovementResource Granted;
+        public float DriveCap, VRelX, FloorVx, VelX;
         public Vector2 Origin, T0;
 
         public int AddRows(CorrectorScratch s, int H, float dt, int pass, int rowCount)
@@ -243,13 +252,43 @@ public static class LatticeTracker
             // Air profiles keep the x-only cap: an air speed bounds lateral
             // steering, while the vertical is gravity and the legs' launch
             // ("as fast as possible" along a rising path).
+            // Like the arc cap, a limit on what is added, never a demand to
+            // brake: a body already faster along intent keeps its own speed.
             if (!ArcSpeed && Dir != 0 && float.IsFinite(Speed))
             {
+                float cap = MathF.Max(Speed, Dir * VelX);
                 for (int T = 0; T < H; T++)
                 {
                     float along = (s.DeliverySamples[T].Pos.X - Origin.X) * Dir;
                     s.Rows[rowCount++] = new ClearanceRow
-                        { Tick = T, Normal = new Vector2(-Dir, 0f), Depth = along - Speed * (T + 1) * dt, HingeScale = 1f, Reference = true };
+                        { Tick = T, Normal = new Vector2(-Dir, 0f), Depth = along - cap * (T + 1) * dt, HingeScale = 1f, Reference = true };
+                }
+            }
+            // Zero input commands zero speed relative to the floor (§9.2 step
+            // 2): braking is asked for by a row like everything else, and the
+            // Drive channel's braking side answers it. The commanded motion is
+            // the speed going to zero at the rate Drive can brake (its cap, on
+            // top of whatever the baseline — slip friction — already does),
+            // and no further. One row per tick bounds the displacement
+            // relative to the floor, in the direction of motion, by that
+            // profile (a lower bound as well made Drive's two sides fight
+            // across the horizon; nothing asks for a reversal without it). A
+            // body at rest gets the bound on both sides: hold station.
+            if (Dir == 0 && Granted.Has(MovementResource.Legs))
+            {
+                float sgn = MathF.Sign(VRelX);
+                float cmd = 0f;   // commanded displacement along sgn, relative to the floor
+                for (int T = 0; T < H; T++)
+                {
+                    float vFree = sgn * (s.CoastVel[T].X - FloorVx);
+                    cmd += MathF.Max(0f, vFree - DriveCap * dt * (T + 1)) * dt;
+                    float dFree = sgn * (s.DeliverySamples[T].Pos.X - Origin.X - FloorVx * (T + 1) * dt);
+                    var n = new Vector2(sgn == 0f ? 1f : sgn, 0f);
+                    s.Rows[rowCount++] = new ClearanceRow
+                        { Tick = T, Normal = -n, Depth = dFree - cmd, HingeScale = 1f, Reference = true };
+                    if (sgn == 0f)
+                        s.Rows[rowCount++] = new ClearanceRow
+                            { Tick = T, Normal = n, Depth = cmd - dFree, HingeScale = 1f, Reference = true };
                 }
             }
             return rowCount;
@@ -259,7 +298,7 @@ public static class LatticeTracker
         public bool ProgressAuthority(CorrectorScratch s, Vector2 tLast, out float capAlong)
         {
             bool legs = Granted.Has(MovementResource.Legs);
-            float capX = legs ? Cfg.FoldDriveForce : 0f;
+            float capX = legs ? DriveCap : 0f;
             float capY = !legs ? 0f : tLast.Y < 0f ? Cfg.FoldLegForce : Cfg.FoldTuckForce;
             capAlong = MathF.Abs(tLast.X) * capX + MathF.Abs(tLast.Y) * capY;
             return Planning;
@@ -273,10 +312,8 @@ public static class LatticeTracker
             // Masks: the resource layer's grant (probes ∧ the state's Uses),
             // nothing else (plan §3.2). Air control is the state's baseline,
             // not a solver channel.
-            int count = CorrectorChannels.BuildFold(s, H, Dir, SupportVy, Granted);
-            // Drive along the route's direction at the body (unilateral).
-            ch[1].Axis = new Vector2(MathF.Sign(t0.X), 0f);
-            ch[1].Unilateral = true;
+            int count = CorrectorChannels.BuildFold(s, H, Dir, SupportVy, Granted,
+                DriveCap, VRelX, Cfg.MaxWalkSpeed);
             // Redirect (left as it is, plan §0): the disc never grows forward
             // speed past min(walk speed, the state's speed) along the route's
             // direction at the body — a deflection keeps |v|, so a 200 px/s

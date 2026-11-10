@@ -948,18 +948,18 @@ public class PlayerCharacter : IHittable
         // movement reads them through ctx.Modifiers.
         _currentAction.ApplyMovementModifiers(ref ctx.Modifiers, in _actionVars);
 
-        // Hitstun mutes self-control AFTER action modifiers so a hit always wins
-        // the stack (COMBAT_FEEL_PLAN Phase 1): knockback displaces instead of
-        // being steered away or clipped by the speed caps. The residual accel is
-        // the victim's DI; PreserveExternalVelocity stops AirControl / the ground
-        // states from braking over-cap velocity back down.
+        // Hitstun mutes self-control IN THE AIR, after action modifiers so a hit
+        // always wins the stack (COMBAT_FEEL_PLAN Phase 1): air accel and drag
+        // are scaled so knockback displaces. It does nothing to ground movement
+        // (Plans/MOVEMENT_RESOURCE_MODEL.md §9): a hit changes the body's
+        // velocity and the feet grip or slip by that speed alone.
+        // PreserveExternalVelocity is now read only by the climb probe's coast
+        // and the animation layer.
         if ((_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl)
             || _abilities.Combat.SlideActive(_frame))   // guard pushback slide: the shove carries
         {
-            ctx.Modifiers.WalkAccel      *= CombatState.HitstunAccelScale;
             ctx.Modifiers.AirAccel       *= CombatState.HitstunAccelScale;
             ctx.Modifiers.AirDrag        *= CombatState.HitstunDragScale;
-            ctx.Modifiers.GroundFriction *= CombatState.HitstunFrictionScale;
             ctx.Modifiers.PreserveExternalVelocity = true;
         }
 

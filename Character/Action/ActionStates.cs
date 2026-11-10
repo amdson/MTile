@@ -524,7 +524,6 @@ public class RecoveryAction : ActionState
         if (!vars.Charging) return;
         m.MaxWalkSpeed   *= 0.6f;
         m.WalkAccel      *= 0.7f;
-        m.GroundFriction *= 1.3f;
         m.MaxAirSpeed    *= 0.7f;
         // Slow fall only through the ramp + sweet spot. The hold is uncapped
         // now, so a settle-length cap would be a free parachute glide for as
@@ -1663,7 +1662,6 @@ public class StabAction : ActionState
         bool inLunge = vars.TimeInState >= LungeStart && vars.TimeInState <= LungeEnd;
         m.MaxWalkSpeed   *= 0.35f;
         m.WalkAccel      *= 0.5f;
-        m.GroundFriction *= inLunge ? 0.15f : 1.5f;
         m.MaxAirSpeed    *= 0.6f;
         m.AirDrag        *= 1.3f;
     }
@@ -2624,7 +2622,6 @@ public class PulseAction : ActionState
     {
         m.MaxWalkSpeed   *= 0.25f;
         m.WalkAccel      *= 0.5f;
-        m.GroundFriction *= 1.5f;
         m.MaxAirSpeed    *= 0.25f;
         m.AirAccel       *= 0.5f;
         m.AirDrag        *= 1.5f;
@@ -2824,7 +2821,6 @@ public class BurstAction : ActionState
     {
         m.MaxWalkSpeed   *= 0.3f;
         m.WalkAccel      *= 0.5f;
-        m.GroundFriction *= 1.5f;
         m.MaxAirSpeed    *= 0.3f;
         m.AirDrag        *= 1.5f;
         m.GravityScale   *= 0.4f;

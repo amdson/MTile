@@ -11,7 +11,6 @@ public struct MovementModifiers
 {
     public float WalkAccel;
     public float MaxWalkSpeed;
-    public float GroundFriction;
     public float AirAccel;
     public float MaxAirSpeed;
     public float AirDrag;
@@ -40,7 +39,6 @@ public struct MovementModifiers
     {
         WalkAccel      = 1f,
         MaxWalkSpeed   = 1f,
-        GroundFriction = 1f,
         AirAccel       = 1f,
         MaxAirSpeed    = 1f,
         AirDrag        = 1f,

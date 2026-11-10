@@ -64,7 +64,7 @@ public static class ClearanceConstraintBuilder
 {
     // Raised 4 → 32 for the stand fold: hover-support rows are per-tick (up to a
     // full horizon of them) and must not crowd out real obstacle rows.
-    public const int   MaxEvents            = 32;
+    public const int   MaxEvents            = 48;   // 32 → 48 for the tracker's zero-speed rows (plan §9)
     // Body-penetration depth: 8 px into the body reads as "impact", not "graze".
     // Body-relative px, deliberately independent of Chunk.TileSize.
     public const float DefaultDeepViolation = 8f;

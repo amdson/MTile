@@ -10,6 +10,8 @@
   "FoldIterations": 16,
   "FoldLegForce": 6000,
   "FoldDriveForce": 3000,
+  "SlipDriveForce": 400,
+  "SlipFriction": 400,
   "FoldCornerForce": 1500,
   "FoldTuckForce": 3600,
   "FoldRedirectForce": 1500,

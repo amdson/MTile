@@ -119,12 +119,8 @@ public static class BallisticPredictor
                 float holdScale = Math.Clamp(
                     (SupportReach - (floorY - pos.Y)) / (SupportReach - HoldFullDist), 0f, 1f);
                 force.Y -= gravity.Y * holdScale;
-                if (inputDirX == 0 && dt > 0f)
-                {
-                    // Surface-tangential frame, mirroring live FoldBaseline.
-                    float frictionCap = cfg.GroundFriction * modifiers.GroundFriction;
-                    force.X = Math.Clamp(-(vel.X - floorVel.X) / dt, -frictionCap, frictionCap) * holdScale;
-                }
+                // (No station friction: live FoldBaseline's braking became the
+                // Drive channel's, Plans/MOVEMENT_RESOURCE_MODEL.md §9.)
             }
             else
             {
