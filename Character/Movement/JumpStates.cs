@@ -116,14 +116,7 @@ public class JumpingState : MovementState
     // FoldProfile.ImpulseJump (legs off — nothing launches it twice). Decided
     // once, at Enter (vars.JumpImpulse), so a launch never switches mechanism
     // mid-rise.
-    private static bool LegsInReach(EnvironmentContext ctx)
-    {
-        var body = ctx.Body;
-        float floorY = AmbientCorrector.FloorEnvelope(ctx.Chunks, CObstacleTemplate.For(body.Polygon),
-            body.Position.X, body.Position.Y - 2f, body.Position.Y + CorrectorChannels.LegReach,
-            out bool found);
-        return found && floorY - body.Position.Y <= CorrectorChannels.LegReach;
-    }
+    private static bool LegsInReach(EnvironmentContext ctx) => ctx.LegsInReach;
 
     // The lattice-native planned rise (above), as opposed to the hybrid impulse.
     private static bool PlannedRise(in MovementVars vars) => !vars.JumpImpulse;

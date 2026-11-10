@@ -71,11 +71,7 @@ public class StandingState : MovementState
     // the plain probe: states are sticky.
     internal static bool IsStandingGround(EnvironmentContext ctx)
     {
-        if (!ctx.TryGetGround(out var ground)) return false;
-        float riseSpeed = Vector2.Dot(ctx.Body.Velocity - ground.SurfaceVelocity, ground.Normal);
-        if (riseSpeed > MovementConfig.Current.SpringMaxRiseSpeed) return false;
-        float dist = Vector2.Dot(ctx.Body.Position - ground.Position, ground.Normal);
-        return dist <= BallisticPredictor.SupportReach;
+        return ctx.Support(out _);
     }
 
     // The stand fold (see AmbientCorrector): no ground FSD, no hover spring —
@@ -126,20 +122,12 @@ public class StandingState : MovementState
         // the sprout-lift jitter. Static floors have zero SurfaceVelocity and
         // collapse to the old form. Entry (IsStandingGround) already measured
         // relative; support now agrees with it.
-        bool supported = ctx.TryGetGround(out var ground)
-            && -(ctx.Body.Velocity.Y - ground.SurfaceVelocity.Y)
-                <= MovementConfig.Current.SpringMaxRiseSpeed;
-        if (!supported) return Vector2.Zero;
-        float dist = ground.Position.Y - ctx.Body.Position.Y;
         // The hold FADES across the spring's old support range: full inside
-        // the rest band (2R ≈ the old FSD MinDistance), zero at SupportReach.
-        // A body floating above hover gets mostly-real gravity — the old
-        // spring gave nothing above its rest length, and a binary hold out to
-        // SupportReach let sprout-lifted bodies coast up in zero-g.
-        float holdScale = Math.Clamp(
-            (BallisticPredictor.SupportReach - dist)
-                / (BallisticPredictor.SupportReach - BallisticPredictor.HoldFullDist), 0f, 1f);
-        if (holdScale <= 0f) return Vector2.Zero;
+        // the rest band (2R ≈ the old FSD MinDistance), zero at SupportReach
+        // (the Support probe's payload). A body floating above hover gets
+        // mostly-real gravity.
+        if (!ctx.Support(out float holdScale) || holdScale <= 0f) return Vector2.Zero;
+        ctx.TryGetGround(out var ground);
         var force = new Vector2(0f, -ctx.Gravity.Y * holdScale);
         if (ctx.Intent.CurrentHorizontal == 0 && ctx.Dt > 0f)
         {
@@ -329,8 +317,8 @@ public class DropdownState : MovementState
             int nv = PathTracker.BuildClipPolyline(s, body.Position, clip,
                 new ReferenceFrame(clip, vars.RefEntry, vars.RefGate), out float arcLength);
             float pace = arcLength / MathF.Max(clip.Duration, 1e-4f);
-            float floorY = AmbientCorrector.FloorEnvelope(ctx.Chunks, CObstacleTemplate.For(body.Polygon),
-                body.Position.X, body.Position.Y - 2f, body.Position.Y + CorrectorChannels.LegReach, out bool floorFound);
+            var fp = ctx.Floor;
+            float floorY = fp.Y; bool floorFound = fp.Found;
             var slide = new SlidePathPolicy(vars.DropDir, pace);
             PathTracker.FollowPolyline(ctx, s, nv, ref slide,
                 floorFound ? floorY : float.PositiveInfinity, grounded: floorFound);

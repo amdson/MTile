@@ -194,6 +194,100 @@ public class EnvironmentContext
     // corrector's predictor integrates against the same field the physics step uses.
     public Vector2 Gravity;
 
+    // ── Channel probes (Plans/MOVEMENT_RESOURCE_MODEL.md §3.1) ───────────
+    // Named tests on the environment, each answering "can this channel act
+    // here". A channel's mask and a state's gate read the SAME probe, so they
+    // cannot disagree. Geometry (Floor) is cached per body position; the
+    // velocity-dependent parts are evaluated on demand, because a state's
+    // Enter may write the velocity between a precondition and the tracker.
+
+    public struct FloorProbe
+    {
+        public bool    Found;            // a standable C-space surface under the body, in band
+        public float   Y;                // its y (the body center's resting line on it)
+        public float   Distance;         // Y − body.Y (∞ when not found)
+        public Vector2 SurfaceVelocity;  // the standing ground probe's surface velocity (0 if none)
+    }
+
+    private bool _floorProbed;
+    private Vector2 _floorProbePos;
+    private FloorProbe _floor;
+
+    // Floor: a standable surface under the body (C-space floor envelope), from
+    // 2 px above the center down to leg reach.
+    public FloorProbe Floor
+    {
+        get
+        {
+            if (!_floorProbed || _floorProbePos != Body.Position)
+            {
+                var pos = Body.Position;
+                float y = AmbientCorrector.FloorEnvelope(Chunks, CObstacleTemplate.For(Body.Polygon),
+                    pos.X, pos.Y - 2f, pos.Y + CorrectorChannels.LegReach, out bool found);
+                _floor = new FloorProbe
+                {
+                    Found = found, Y = y,
+                    Distance = found ? y - pos.Y : float.PositiveInfinity,
+                    SurfaceVelocity = TryGetGround(out var g) ? g.SurfaceVelocity : Vector2.Zero,
+                };
+                _floorProbed = true; _floorProbePos = pos;
+            }
+            return _floor;
+        }
+    }
+
+    // The floor is within the legs' reach.
+    public bool LegsInReach { get { var f = Floor; return f.Found && f.Distance <= CorrectorChannels.LegReach; } }
+
+    // Leaving the floor: rising faster, relative to it, than support could push.
+    public bool Launching => -(Body.Velocity.Y - Floor.SurfaceVelocity.Y) > MovementConfig.Current.SpringMaxRiseSpeed;
+
+    // Legs: the floor in leg reach and the body not leaving it.
+    public bool Legs => LegsInReach && !Launching;
+
+    // Support: the standing ground probe within SupportReach of the center,
+    // not rising faster than support could push. Hold = the gravity hold's
+    // strength, full inside HoldFullDist, zero at SupportReach.
+    public bool Support(out float hold)
+    {
+        hold = 0f;
+        if (!TryGetGround(out var ground)) return false;
+        if (-(Body.Velocity.Y - ground.SurfaceVelocity.Y) > MovementConfig.Current.SpringMaxRiseSpeed) return false;
+        float dist = ground.Position.Y - Body.Position.Y;
+        if (dist > BallisticPredictor.SupportReach) return false;
+        hold = Math.Clamp((BallisticPredictor.SupportReach - dist)
+            / (BallisticPredictor.SupportReach - BallisticPredictor.HoldFullDist), 0f, 1f);
+        return true;
+    }
+
+    // HandCorner: a plantable convex corner within hand reach of the body as
+    // it is now (CorrectorChannels.MarkCornerPlants, lips above a rising body).
+    public bool HandCorner
+    {
+        get
+        {
+            var probe = new CoastSample[1];
+            probe[0] = new CoastSample { Pos = Body.Position, Vel = Body.Velocity, Grounded = LegsInReach };
+            var mask = new bool[1];
+            CorrectorChannels.MarkCornerPlants(Chunks, probe, 1, mask, risingLips: true);
+            return mask[0];
+        }
+    }
+
+    // WallLeft / WallRight: an exposed wall face within hand reach that the
+    // body can shove off toward -x / +x (CorrectorChannels.MarkContactPush).
+    public void Walls(out bool pushLeft, out bool pushRight)
+    {
+        var probe = new CoastSample[1];
+        probe[0] = new CoastSample { Pos = Body.Position, Vel = Body.Velocity };
+        var l = new bool[1]; var r = new bool[1];
+        CorrectorChannels.MarkContactPush(Chunks, probe, 1, l, r);
+        pushLeft = l[0]; pushRight = r[0];
+    }
+
+    // Grip: a held corner within arm's reach.
+    public bool Grip(Vector2 corner) => CorrectorChannels.InGripReach(Body.Position, corner);
+
     public bool TryGetGround(out FloatingSurfaceDistance ground) =>
         TryGetGroundAt(PlayerCharacter.Radius, GroundChecker.StandingProbeSlack, ref _groundSearched, ref _hasGround, ref _groundContact, out ground);
 

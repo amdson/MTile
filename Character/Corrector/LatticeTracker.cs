@@ -54,18 +54,14 @@ public static class LatticeTracker
         int H = Math.Min(PathTracker.Horizon, BallisticPredictor.MaxHorizon);
 
         // ── The body's situation (masks and caps are frozen from it) ─────
-        var template = CObstacleTemplate.For(body.Polygon);
-        float floorY = AmbientCorrector.FloorEnvelope(ctx.Chunks, template, body.Position.X,
-            body.Position.Y - 2f, body.Position.Y + CorrectorChannels.LegReach, out bool floorFound);
-        float dist = floorFound ? floorY - body.Position.Y : float.PositiveInfinity;
-        bool near     = dist <= CorrectorChannels.LegReach;
-        // Rising faster than support could ever push: the body is leaving the
-        // floor, so there is nothing to plant against (StandingState's entry
-        // rule, and the climb family's launch gate). Support-relative
-        // (BACKLOG 5.8): a floor rising under the body is a moving frame the
-        // legs can still plant in, not a launch.
-        float supportVy = ctx.TryGetGround(out var supportFsd) ? supportFsd.SurfaceVelocity.Y : 0f;
-        bool ballistic = -(body.Velocity.Y - supportVy) > cfg.SpringMaxRiseSpeed;
+        // The channel probes (EnvironmentContext; plan §3.1).
+        var floorProbe = ctx.Floor;
+        bool floorFound = floorProbe.Found;
+        float floorY = floorProbe.Y;
+        float dist = floorProbe.Distance;
+        bool near     = ctx.LegsInReach;
+        float supportVy = floorProbe.SurfaceVelocity.Y;
+        bool ballistic = ctx.Launching;
         bool anchored = dist <= BallisticPredictor.SupportReach;
 
         // ── The plan ─────────────────────────────────────────────────────
@@ -132,11 +128,11 @@ public static class LatticeTracker
         // above the head) — the one place the engine acts in free air. See
         // the Redirect mask below.
         // Every tick's sample is the same held state, so one scan serves all.
-        CorrectorChannels.MarkCornerPlants(ctx.Chunks, s.Samples, 1, s.CornerPlant, risingLips: true);
-        for (int k = 1; k < H; k++) s.CornerPlant[k] = s.CornerPlant[0];
+        bool handCorner = ctx.HandCorner;
+        for (int k = 0; k < H; k++) s.CornerPlant[k] = handCorner;
         // Contact-push surfaces (walls, a hole's lips) — same held state.
-        CorrectorChannels.MarkContactPush(ctx.Chunks, s.Samples, 1, s.ContactPushLeft, s.ContactPushRight);
-        for (int k = 1; k < H; k++) { s.ContactPushLeft[k] = s.ContactPushLeft[0]; s.ContactPushRight[k] = s.ContactPushRight[0]; }
+        ctx.Walls(out bool pushLeft, out bool pushRight);
+        for (int k = 0; k < H; k++) { s.ContactPushLeft[k] = pushLeft; s.ContactPushRight[k] = pushRight; }
 
         // ── Reference polyline: the plan's nodes, and nothing else ────────
         // The body is NOT a vertex. It is a point near the route, projected

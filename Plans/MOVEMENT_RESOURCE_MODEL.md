@@ -674,3 +674,29 @@ Got worse / changed:
 - r2 #6 (fall onto a block corner from x=213): Mantle no longer fires; the body is caught on the
   block by the legs (Drive peaks 1559 px/s², vx 63.8) and then rises slowly onto the top.
 - §12.4's third case (a refused plan whose last segment runs along a wall) was not constructed.
+
+### Item 2 — `ChannelProbes`, read-only (stage 1)
+
+Change: `EnvironmentContext` gains `Floor` (C-space floor envelope, band −2 … +`LegReach`, payload
+y / distance / the ground probe's surface velocity; cached per body position), `LegsInReach`,
+`Launching` (the support-relative rise test), `Legs` (= in reach and not launching), `Support(out
+hold)` (the ground probe within `SupportReach` with the rise test; hold strength as payload),
+`HandCorner`, `Walls(out left, out right)` and `Grip(corner)`. Velocity-dependent probes are
+evaluated on demand, not cached, because a state's `Enter` can write velocity between a
+precondition and the tracker. Routed through them, thresholds unchanged: the tracker's floor,
+`near`, `ballistic`, support velocity, corner-plant and contact-push masks; `FoldBaseline`;
+`IsStandingGround`; `JumpingState.LegsInReach`; `DropdownState`'s floor.
+
+Trace: r1 and r2 byte-identical to item 1.
+
+Where two definitions of one probe disagree (read from the code; distances are center → tile top
+unless stated; the polygon bottom is center + 7.2):
+
+| Probe | Definitions | Disagreement |
+|---|---|---|
+| Legs (reach) | `LegsInReach`: C-space envelope ≤ 21.8 (top ≤ center + 29.0), over the hull's full width with bevels. Standing ground probe (`TryGetGround`): strip under the polygon, inset 2 px each side, top ≤ bottom + 21.8 (= center + 29.0) | Same vertically; sideways the strip loses the floor 2 px + the bevel earlier at an edge than the envelope. This is the ledge boost: Standing ends (Falling owns the body) while the channels still have legs. |
+| Legs (rise test) | Redirect mask: `Legs` (reach and not launching). LegServo, Drive, Tuck masks: reach only (the leg servo's cap fades with rise instead). Contact push: `Grounded && −vy ≤ 80` absolute. Climb triggers (`ClimbStates` 75, 192) and `BallisticPredictor` 199: absolute vy. `Launching`, `Support`: relative to the floor's velocity | Three channels skip the test; three sites use absolute instead of support-relative vy. |
+| Support | `FoldBaseline` / `IsStandingGround` (now `Support`): ground probe, top ≤ center + 29.8, hold full at ≤ 28.8. Tracker's `anchored`: C-space distance ≤ 29.8 (= top ≤ center + 37) — but its envelope only searches to `LegReach`, so `anchored` is identical to `near`. Coast predictor / planner: C-space ≤ 29.8 | `SupportReach` is applied to two different distances (tile top vs C-space surface, 7.2 px apart); the tracker's support collapses to leg reach. |
+| Standing (state) | Entry: `Support`. Continuation: `TryGetGround` (no rise test, reach 29.0). Channels: `LegsInReach` (C-space) | Entry, continuation and channels are three tests. |
+| Jump source | Planned-rise vs impulse choice: `LegsInReach`. Precondition: `TryGetGround`, stair probe, gripped corner, or `JumpSupportChecker` (exposed tops to bottom + 21.8, 4 px past the sides, lips 6 px above the foot line). Continuation: ground probe with 60 px slack (`JumpSourceProbeSlack`). Running jump: `TryGetGround` | Four reaches for "can I push off". |
+| Floor (other users) | `GroundChecker` strip (states: Dropdown, WallSlide, Stunned, Tumble, Dash, CoveredJump, Crouched, the PlayerCharacter fall check). `TryGetCrouchGround` (slack + hover offset). Floor envelope (tracker, jump, dropdown) | Two geometries (strip vs C-space). |
