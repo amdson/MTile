@@ -1,28 +1,19 @@
 1. improve movement feel. 
 - fix issue with overly long time horizon on lattice planning, esp when jumping up (deferred)
-- add more advantages to being on the ground (probably lower knockback) 
 - add a specific animation for wall jumping while controls are holding player into wall 
 
 
 
-- lower clod decay rate by 80%
-- activate tile collisions for clods only after release from mouse, so that they don't get caught in terrain all the time
 - lower the time between aerial slashes, but keep the end lag if the combo ends. same for ground slashes
-- when grabbing someone, shift+space shouldn't trigger dash
-- massively nerf struggle slashes while grabbed
+  (partial: the combo gap skips the tail on a continue, and since 26aea58 a CONNECTING slash stamps a shorter tail -
+  air 18 -> 10f - but that shorter tail also applies when the string stops on a hit, and the gap itself is unchanged)
+- massively nerf struggle slashes while grabbed (partial: b983d60 halved GrabbedSlash's grab-strength damage 1 -> 0.5,
+  so a grab breaks on the 6th struggle hit, not the 3rd - more if that isn't enough)
 - make grab box location move with mouse angle
 - slow down avalanche block generation
 - debug issues with block placement getting truncated when mouse is swept on a long arc around the stage. 
-- increase time grab can be active
 
 A. a boss that generates a damaging rain/wind that permeates the stage, blowing to the left and doing decent damage and knockback per second. the boss is on the right side, at the very end, with knockback dealing attacks and fairly low health. in addition to the wind and melee attacks, the boss can lob explosives at enemies
-B. More telegraphed grab animation
-C. prevent shift while grabbing from triggering dash
-D. Add clanks to applicable attacks. as a general rule, melee attacks should clank, with the exception of burst. 
- - before hitbox -> hurtbox pairwise collision check, run hitbox to hitbox
- - attacks within say 20% damage of each other should clank. if the difference is greater, the stronger attack should win
- - clanking should generate an explosive or metallic clashing noise, depending on context
-E. Bot tournament to make better player AI
 
 M. Open follow-ups from the 2026-11-05 combat frame-data pass (branch combat-frame-data; everything implemented from
    that pass, with its logs and decisions, is in todo_done.txt)

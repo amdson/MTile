@@ -110,7 +110,13 @@ public class InputParser
         bool spaceEdgeUnderShift = cur.Space && !prev.Space && cur.Shift;
         bool shiftAfterSpace     = cur.Shift && !prev.Shift && cur.Space
                                    && currentFrame - _lastJumpEmitted <= DashChordGraceFrames;
-        if ((spaceEdgeUnderShift || shiftAfterSpace) && currentFrame > _lastDashEmitted)
+        // Not while a Shift-opened LMB press is still down: that Shift belongs to the
+        // grab / block grab being held (GrabAction holds while LMB is down), so Space
+        // there is a jump, not a dash. Gated at emission, like the Shift-owned drag
+        // gestures below, because movement may not read the action that owns the hold.
+        bool shiftOwnedByHold    = _activePressFrame >= 0 && _activePressShift && cur.LeftClick;
+        if ((spaceEdgeUnderShift || shiftAfterSpace) && !shiftOwnedByHold
+            && currentFrame > _lastDashEmitted)
         {
             buffer.Issue(new ActionIntent { Type = IntentType.Dash, IssuedFrame = currentFrame });
             _lastDashEmitted = currentFrame;

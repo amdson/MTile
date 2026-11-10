@@ -1,5 +1,28 @@
 # Done (moved out of todo.txt on 2026-11-05). Newest at the top of each section; see git history for the commits.
 
+## Moved 2026-11-10 (audited against the code and git history)
+- [x] 2026-11-10: grab hold 72f -> 120f (FrameData.GrabAction.Active; 1.2 s -> 2 s before the auto-throw).
+- [x] 2026-11-10: Shift+Space no longer dashes while a grab is held (todo 1 + C). InputParser drops the dash chord while
+  a Shift-opened LMB press is still down - that Shift belongs to the hold (Grab, and BlockGrab carrying a clod), so
+  Space is just a jump. Gated at emission because movement may not read action state.
+- [x] 2026-11-10: held clods ignore tiles (LobbedAreaProjectile.TerrainTransparent, re-derived each frame before
+  physics, no new snapshot state). After release a clod stays transparent only while its CENTER is in a solid cell
+  (buried: it flies out); a rim overlap keeps contact so a point-blank throw still bursts on the wall
+  (BlockThrowWallStrikeTests). The collision disc was already 5 px (< half an 11 px tile), so shrinking it was moot.
+- [x] Clanks for melee attacks (todo D): 6512067 (2026-11-03). Opposing melee hitboxes resolve against each other
+  before hurtboxes; close damage clanks, a big gap lets the stronger attack win; burst exempt. The sound is
+  PresentationKind.Clank -> SoundKind.ClankMetal / ClankBlast, which for now borrow the parry ping and the charged-blast
+  boom (Audio/SoundKind.cs) - no dedicated clank clips have been cut.
+- [x] More telegraphed grab animation (todo B): f87568f / 620aec6 (2026-11-03) - grab start/hold/throw/whiff clips
+  (SkeletonStates/biped/grab*.json). The startup since dropped 20f -> 6f in the frame-data pass (26aea58).
+- [x] Lower clod decay rate (asked: by 80%): 00b4c47 (2026-11-04) - GrabDissipateSeconds 2 -> 8 s, i.e. the rate / 4
+  (75%, not quite 80%; 10 s would be 80%).
+- [x] More advantages to being on the ground (lower knockback): b497767 grounded knockback reduction + 26aea58 ground
+  armor (stab grounded, S3). A grounded HITSTUN cut is still open as K3 in todo.txt item M.
+- [x] Bot tournament to make better player AI (todo E): the duelist league (f16f1fb, 71e5317, BotView fairness 0e5824a)
+  and the bot-learning campaign (BotController / BetLedger, 2026-11-04..05, final 24-seed result 35988ff: learner 554 vs
+  hand 534 of 720). The open Ranger learner-vs-NoLearn decision stays in todo.txt item M.
+
 ## Loose items
 - Remove the cooldown from spike avalanche   [x] 2026-11-05: CrystalWave.CooldownSeconds 8 -> 0
 

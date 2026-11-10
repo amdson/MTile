@@ -69,7 +69,7 @@ public static class FrameData
     // longest hold before the auto-throw. EndLag: the recovery the throw / whiff clips
     // play over (GrabAction.Throw / GrabAction.Whiff). A grab never latches a victim who
     // is launched, stunned or in hitstun (Hurtbox.Helpless) - that is the anti-regrab.
-    public static class GrabAction       { public const float Startup =  6 / F,  Active = 72 / F,                 EndLag = 18 / F; }   // 6f: Smash's grab (todo F); was 20
+    public static class GrabAction       { public const float Startup =  6 / F,  Active = 120 / F,                EndLag = 18 / F; }   // 6f: Smash's grab (todo F); was 20. Hold 72 -> 120f (2 s) 2026-11-10
 }
 
 // Concurrent second FSM, owned by PlayerCharacter alongside the MovementState FSM.

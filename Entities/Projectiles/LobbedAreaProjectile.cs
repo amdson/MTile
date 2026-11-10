@@ -22,9 +22,10 @@ namespace MTile;
 // TRACKING PHASE (block grab, §4.7). A grab's ball is born at rest where the blocks
 // were, following its PullPointEntity with a critically damped, speed-capped tracker —
 // the same code whether the point is still in the player's hand or already flying
-// after release. While tracking: gravity off, tiles ON (a held clod is a physical
-// object — it can't be dragged into the floor, it slides along a wall the cursor
-// crosses), no hurtbox, and the budget bleeds while the point is held. Terrain contact
+// after release. While tracking: gravity off, no hurtbox, and the budget bleeds while
+// the point is held. Tiles are OFF while the clod is in hand (2026-11-10: a held clod
+// that collided kept snagging on the terrain it was dragged through) and come on after
+// release once the clod's center is out of solid — see TerrainTransparent. Terrain contact
 // never bursts a HELD clod, but touching a body it can hurt does — the same burst a
 // thrown one makes (the held fuse in Track). The tracker
 // writes only Body.Velocity; PhysicsWorld integrates the position. Once the point has
@@ -202,6 +203,9 @@ public class LobbedAreaProjectile : Projectile
 
     protected override void ProjectileUpdate(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
     {
+        // Re-derived every frame (before this step's physics) from snapshotted state and
+        // the terrain, so it needs no snapshot field of its own.
+        Body.IgnoreTiles = TerrainTransparent(spawner);
         if (_tracking) { Track(dt, hitboxes, spawner); return; }
 
         if (_detonated) { Health = 0f; return; }
@@ -449,6 +453,23 @@ public class LobbedAreaProjectile : Projectile
         if ((vel - point.Body.Velocity).Length() < cfg.GrabCatchSpeed
             || _chaseTime >= cfg.GrabChaseMaxSeconds)
             Detach();
+    }
+
+    // Terrain-transparent while the clod is in hand, and after release while its
+    // CENTER is inside a solid cell: a clod let go buried in the ground flies out of it
+    // instead of bursting (or wedging) in the cells it was carried through. A shallower
+    // overlap — the rim of a clod released against a wall — keeps tile contact, so the
+    // solver pushes it out and the strike fuse bursts it on the face (and a clod resting
+    // on a floor, whose center never enters solid, can't flicker through it).
+    private bool TerrainTransparent(IEntitySpawner spawner)
+    {
+        if (_tracking && spawner?.Resolve(_pointId) is PullPointEntity { IsDead: false, Driven: true })
+            return true;
+        var chunks = spawner?.Chunks;
+        if (chunks == null) return false;
+        var p = Body.Position;
+        return chunks.GetCellState((int)MathF.Floor(p.X / Chunk.TileSize),
+                                   (int)MathF.Floor(p.Y / Chunk.TileSize)) == TileState.Solid;
     }
 
     // Let go of the point: a free ballistic lob from here, arming clock restarted so a
