@@ -146,6 +146,18 @@ public static partial class Stages
             Populate      = PopulateQuillback,
         });
 
+        // ─── stormcaller ──────────────────────────────────────────────────────
+        // StormcallerEnemy boss fight (Levels/stormcaller.json — a long hall, floor at
+        // tile row 12). The boss stands at the far right end and its gale blows left the
+        // whole way down; you start near the left wall and have to walk into it. It
+        // respawns 4 s after dying. See Entities/Enemies/Types/StormcallerEnemy.cs.
+        Register(new Stage {
+            Name          = "stormcaller",
+            TerrainConfig = "stormcaller.json",
+            PlayerSpawn   = new Vector2(-40 * Chunk.TileSize, WarlordFloorTopY - 30f),
+            Populate      = PopulateStormcaller,
+        });
+
         // ─── spearman ─────────────────────────────────────────────────────────
         // SpearmanEnemy demo, on the Warden's terrain (Levels/warden.json). One
         // Spearman holds the 3-block ledge to your right — it won't walk off it, so
@@ -1149,6 +1161,25 @@ public static partial class Stages
             foreach (var e in g.Entities)
                 if (e.Kind == EntityKind.Quillback && !e.IsDead) return;
             g.SpawnEntity(new QuillbackEnemy(QuillbackSpawn));
+        });
+    }
+
+    // Four tiles off the right wall (tile x 62), so there is room to get behind it.
+    private static readonly Vector2 StormcallerSpawn = new(58 * Chunk.TileSize, WarlordFloorTopY - StormcallerEnemy.HalfHeight - 2f);
+
+    private static void PopulateStormcaller(Simulation g)
+    {
+        g.SpawnEntity(new StormcallerEnemy(StormcallerSpawn));
+
+        // Respawn on the 4 s beat once no Stormcaller is alive. Pure function of sim state.
+        int period = SimFrames.FromSeconds(4f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            foreach (var e in g.Entities)
+                if (e.Kind == EntityKind.Stormcaller && !e.IsDead) return;
+            g.SpawnEntity(new StormcallerEnemy(StormcallerSpawn));
         });
     }
 

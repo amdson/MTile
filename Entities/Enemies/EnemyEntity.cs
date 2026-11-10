@@ -150,6 +150,9 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     public bool IsStaggered => _currentMovement >= 0 && _movement[_currentMovement] is EnemyStaggerState;
 
     public int Facing => _facing;
+    // Updates this enemy has lived through (snapshotted). For a subtype that runs a
+    // clock of its own outside the FSMs (the Stormcaller's gust beat).
+    protected int FrameCount => _frame;
 
     // Diagnostic only — the class name of the action currently running, or "" when
     // idle. Mirrors PlayerCharacter.CurrentActionName; headless tests use it to

@@ -168,6 +168,8 @@ public sealed class CombatSystem
                 for (int gty = gty0; gty <= gty1; gty++)
                 {
                     if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
+                    if (hit.TileMaxMaterialHP > 0f
+                        && TileDamage.MaxHPFor(chunks.GetCellType(gtx, gty)) > hit.TileMaxMaterialHP) continue;
                     if (hit.Shape != null)
                     {
                         var tileAABB = new BoundingBox(

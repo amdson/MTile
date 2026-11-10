@@ -142,6 +142,15 @@ public enum EntityKind
     FighterMine,
     GrabThrow,      // a player grab's released throw: carries the victim on (see GrabThrowEntity.cs)
     HoverTarget,    // weightless hit-physics target — despawns a few seconds after its first hit (see HoverTarget.cs)
+
+    // Stormcaller — rooted boss at the far right of its stage: a stage-wide leftward
+    // gale (push + a damaging gust every second), two telegraphed knockback strikes up
+    // close, and bombs lobbed on a high slow arc. Subclass; see
+    // Entities/Enemies/Types/StormcallerEnemy.cs.
+    Stormcaller,
+    StormBomb,      // Stormcaller ordnance (StormBombProjectile)
+    StormBeam,      // Stormcaller run-phase beam of wind (StormBeam)
+    StormIce,       // Stormcaller ice field (StormIceField)
 }
 
 public static class EntityKinds

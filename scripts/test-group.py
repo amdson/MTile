@@ -27,7 +27,7 @@ GROUPS = {
  "combat": ["Combat","Guard","DashTests","Grab","DirectDamage","AttackRecoil","Commitment","HitResolver",
             "HitboxOcclusion","HitEviction","HitFlash","ActionOverlay","ActionAimSolver",
             "ClipBinding","DownAirSlash","BurstPogo","BurstCharge","AirHammer","WhipKick","InputParserGesture","RecoveryTransition","Laser",
-            "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","SpearmanEnemy","PulserEnemy","EnemySpawner","WizardEnemy","Warlord","Prism","RayEmitter","Quillback","GauntletEnemy","Zeus","TelegraphList",
+            "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","SpearmanEnemy","PulserEnemy","EnemySpawner","WizardEnemy","Warlord","Prism","RayEmitter","Quillback","Stormcaller","GauntletEnemy","Zeus","TelegraphList",
             "PresentationEventLog","SandImpactDamage","PlayerImpactByVelocity","ImpactCrater",
             "RunningOverUnderImpact","ChargedBlast","SlashCombo","BlockOwnership","SpikeOverlay","ClodGrab","GroundedForActions"],
  "movement": ["Dropdown","Jump","Ledge","Mantle","ArcJump","WallJump","Tumble","StandingJitter",

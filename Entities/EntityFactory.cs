@@ -81,6 +81,7 @@ public static class EntityFactory
         EntityKind.Warlord   => new WarlordEnemy(pos),
         EntityKind.Prism     => new PrismEnemy(pos),
         EntityKind.Quillback => new QuillbackEnemy(pos),
+        EntityKind.Stormcaller => new StormcallerEnemy(pos),
         EntityKind.Spearman  => new SpearmanEnemy(pos),
         EntityKind.Pulser    => new PulserEnemy(pos),
         _ => null,
@@ -120,6 +121,11 @@ public static class EntityFactory
             // EntityData slot LobbedArea uses (disjoint kinds, one slot).
             EntityKind.RailBolt      => new RailBoltProjectile(body.Position, body.Velocity, d.HitId, d.Faction, d.Budget, bodyDamage: d.ProjDamage),
             EntityKind.AspidFireball => new AspidFireballProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
+            // The landing point rides in the Aim slot; the fuse flag comes back through ReadState.
+            EntityKind.StormBomb     => new StormBombProjectile(body.Position, body.Velocity, d.Aim, d.HitId, d.Faction, d.Budget),
+            // Heading and power ride in StateTime / ProjDamage; the seed in Budget.
+            EntityKind.StormBeam     => new StormBeam(body.Position, d.StateTime, d.ProjDamage, d.Faction),
+            EntityKind.StormIce      => new StormIceField(body.Position, d.Budget, d.Faction),
             EntityKind.WizardOrb     => new WizardOrbProjectile(body.Position, d.Aim.X, d.Aim.Y, d.HitId, d.Faction),
             EntityKind.RayEmitter    => RayEmitter.FromState(in d, body.Position),
             EntityKind.Spawner       => EnemySpawner.FromState(in d, body.Position),

@@ -158,6 +158,12 @@ public readonly struct Hitbox
     // while a stun is already running, and a short immunity follows one (CombatState).
     public readonly float       StunSeconds;
 
+    // Soft hit: when > 0, tiles whose material MaxHP is ABOVE this are not touched at
+    // all — the mirror of RecoilMinMaterialHP. For attacks that scour loose material
+    // but leave rock standing (the Stormcaller's run-phase beams). Default 0 ⇒ every
+    // solid cell takes the damage, as before.
+    public readonly float       TileMaxMaterialHP;
+
     // Launch (Physics/Launch.cs). 0 = off: the knockback is plain velocity, as every
     // attack had before launches existed. > 0: the victim's knockback becomes a launch
     // that bleeds off at this many px/s², replacing any launch already running —
@@ -188,6 +194,7 @@ public readonly struct Hitbox
     //   Launch     launchDecay (0 = plain knockback) · launchImpactMass (wall-break weight)
     //              · launchBounce (terrain restitution while launched; 0 = the body's own)
     //   Stun       stunSeconds (0 = none; declared per attack)
+    //   Soft hit   tileMaxMaterialHP (0 = off; tiles tougher than this are skipped)
     //   Clank      clank (None = passes through other attacks; Blade/Blunt = melee)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
@@ -209,8 +216,10 @@ public readonly struct Hitbox
                   ClankKind clank = ClankKind.None,
                   float stunSeconds = 0f,
                   float launchBounce = 0f,
-                  float hitstopSecondsOverride = -1f)
+                  float hitstopSecondsOverride = -1f,
+                  float tileMaxMaterialHP = 0f)
     {
+        TileMaxMaterialHP    = tileMaxMaterialHP;
         Clank                = clank;
         StunSeconds          = stunSeconds;
         LaunchBounce         = launchBounce;

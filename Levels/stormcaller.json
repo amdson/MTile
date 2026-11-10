@@ -1,0 +1,14 @@
+{
+  "//": "StormcallerEnemy boss fight (stage 'stormcaller'). A long hall: floor surface at tile row 12 (world y 132), walls at tile x -50 / 62, ceiling at row -18 (high, so the bombs' arcs clear it). The boss stands at the far right end (tile x 58) and the wind blows left, down the hall; the player starts at tile x -40. Two floating dirt ledges on the way (the Warlord hall's, at chunks -1 and 1). Placement + respawn in Stage.cs (PopulateStormcaller).",
+  "Extents": 5,
+  "ChunkFiles": {
+    "-1,0": "warlord_left.txt",
+    "1,0":  "warlord_right.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 12",  "IsSolid": true },
+    { "Condition": "x <= -50", "IsSolid": true },
+    { "Condition": "x >= 62",  "IsSolid": true },
+    { "Condition": "y <= -18", "IsSolid": true }
+  ]
+}
