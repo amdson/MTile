@@ -36,7 +36,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
                              out float cost, out bool bonk)
         => planner.Solve(chunks, body.Polygon, seed, vel,
             new Vector2(1f, 0f), hover: true, MovementConfig.Current.FoldHoverOffset,
-            MovementConfig.Current.FoldRiseCost, path, out cost, out bonk);
+            MovementConfig.Current.FoldRiseCost, MovementConfig.Current.FoldRecoverCost, path, out cost, out bonk);
 
     // Flat floor at tile row 6 (top face y = 6·TileSize).
     private const int FloorRow = 6;
@@ -309,7 +309,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         var seed = new Vector2((MouthCol + 3) * Chunk.TileSize, 0.5f * (CorridorTop + CorridorBottom));
         var (planner, body, path) = Setup(seed);
         int n = planner.Solve(chunks, body.Polygon, seed, new Vector2(100f, 0f), Vector2.UnitX,
-            hover, MovementConfig.Current.FoldHoverOffset, MovementConfig.Current.FoldRiseCost,
+            hover, MovementConfig.Current.FoldHoverOffset, MovementConfig.Current.FoldRiseCost, MovementConfig.Current.FoldRecoverCost,
             path, out _, out bool bonk);
         Assert.True(n >= 2, $"no route through a passable corridor (hover={hover}): {planner.LastDebug}");
         Assert.False(bonk, $"refused a passable corridor (hover={hover}): {planner.LastDebug}");
@@ -357,7 +357,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         var seed = new Vector2(holeMid + 2.5f, HoverY(FloorRow * ts));
         var (planner, body, path) = Setup(seed);
         int n = planner.Solve(chunks, body.Polygon, seed, Vector2.Zero, -Vector2.UnitY,
-            false, MovementConfig.Current.FoldHoverOffset, 0f, path, out _, out bool bonk);
+            false, MovementConfig.Current.FoldHoverOffset, 0f, 0f, path, out _, out bool bonk);
         Assert.True(n >= 2 && !bonk, $"refused a passable 1-wide hole: {planner.LastDebug}");
         float ceilTop = CeilRow * ts;
         Assert.True(path[n - 1].Pos.Y < ceilTop, $"route ends below the ceiling top: y={path[n - 1].Pos.Y:F2}");

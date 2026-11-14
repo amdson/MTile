@@ -1,11 +1,10 @@
 {
-  "Name": "blockburst",
-  "Type": "BlockBurstAction",
+  "Name": "hang",
+  "Type": "Hang",
   "Skeleton": "biped",
-  "Duration": 0.26,
-  "Loop": false,
-  "Region": "UpperBody",
-  "OffRegionWeight": 0.3,
+  "Duration": 2,
+  "Loop": true,
+  "Motion": "Track",
   "Scene": {
     "Guides": [
       {
@@ -16,6 +15,30 @@
         "W": 0,
         "H": 0,
         "Label": "floor"
+      },
+      {
+        "Id": "g2",
+        "Kind": "Block",
+        "X": 18.333332,
+        "Y": 21.666668,
+        "W": 18.333332,
+        "H": 18.333332
+      },
+      {
+        "Id": "g3",
+        "Kind": "Block",
+        "X": 18.333332,
+        "Y": 3.3333359,
+        "W": 18.333332,
+        "H": 18.333332
+      },
+      {
+        "Id": "g4",
+        "Kind": "Block",
+        "X": 18.333332,
+        "Y": -14.999996,
+        "W": 18.333332,
+        "H": 18.333332
       }
     ]
   },
@@ -29,7 +52,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.5829818
+          "Rotation": -1.3923109
         },
         {
           "Bone": "head",
@@ -37,43 +60,51 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": 3.8171575
+          "Rotation": 3.713725
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": 0
+          "Rotation": -0.65078
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 2.323765
+          "Rotation": 0.9296866
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": 0
+          "Rotation": -0.7993038
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 1.5707964
+          "Rotation": 1.9320078
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0
+          "Rotation": 0.43143094
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.5707964
+          "Rotation": 0.86372524
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0
+          "Rotation": 0.7875303
         }
       ],
       "Additions": [
         {
           "Name": "com",
           "Kind": "Point",
-          "Px": 0,
+          "Px": 2.0000002,
           "Py": -21,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 4.4,
+          "Py": -4.7999997,
           "Dx": 0,
           "Dy": 0
         }

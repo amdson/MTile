@@ -1,0 +1,40 @@
+- limit the amount of velocity redirect can contribute to something reasonable like max walk vel  (2026-11-09: forward cap = walk speed in every state, uncommitted; no trace changed, check in game)
+- evaluate how hitstun affects movement (mostly it shouldn't)
+
+DONE
+- removed qp / ref / lm fold engines, AmbientPolicy, FoldEngine knob (2026-11-09; traces identical)
+
+- path = plan nodes only; body projected onto it (2026-11-09, uncommitted; running-jump brake + walk ripple fixed)
+
+REFACTOR: environment -> resources -> states   (detail: Plans/MOVEMENT_RESOURCE_MODEL.md)
+- ChannelProbes on EnvironmentContext: one cached test per "can this channel act here"; channel masks and state gates read the same probe
+- resources (legs, hands, air) are gated by ChannelProbes and nothing else
+- every solver channel belongs to exactly one resource; no channel re-derives its own availability
+- gate states on channel access where that is the correct gate (Falling = no legs); leave combat / ability / input gates alone
+- states declare the resources they use; a flag like "legs off" covers all of that resource
+- being hit never switches the solver off by a side door
+- one along-path speed per intent, the same number in every state
+- braking is the same law as driving (zero input = command zero)
+
+- channels are never conditioned on the path (path is a goal: rows only)
+- never hide a capability from the solver; fix rows / weights instead
+- feet = up, down, forward, back: Drive two-way in x with ONE cap, friction term folded in, not opt-in
+- hitstun does nothing to ground movement: solver stays on, no hitstun scalars
+- feet grip at or below walk speed (full Drive), slip above it (weak passive friction + weak Drive)
+- walk speed = the most the legs can add, never a demand to brake
+- slide: toward = idle (shortest), away (longest)
+
+- stun still modifies movement; hitstun does not. Stunned = ragdoll: solver off on purpose, uses no resources
+- ground jump needs legs: drop its no-floor-in-reach impulse variant
+- running jump: higher speed threshold, in the pressed direction
+- jump = one solver channel: created with feet planted, then not environment-gated; ends on release or hold time; replaces leg servo while jumping
+- running jump = the same jump entered with speed
+- action modifiers scale channel strength: WalkAccel -> Drive's cap only (not the leg servo); friction modifier goes away (plan §13)
+- Standing boundary = leg reach (same test as the channels); Support keeps its own reach; delete the 60 px jump scan + JumpSupportChecker
+- tests ignored until after the refactor; parkour may be removed
+
+SEPARATE TRACKS (not fixed by the above)
+- path's first segment (body -> first node) is treated as path: running-jump brake, landing speed loss
+- three jump mechanisms with different hold behaviour; pick what a launch is
+- hover is a dead band, not a height; body rides up to 4 px low after a landing or hit (planner re-seeds at the body)
+- walls brake 5 frames early (ceilings likely too): keep a wall row only if the route itself satisfies it (plan §12)

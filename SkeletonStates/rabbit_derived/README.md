@@ -1,16 +1,10 @@
-# rabbit_derived — GENERATED, do not hand-edit
+# rabbit_derived — optional side pool
 
-Every clip here is a pure function of `SkeletonStates/biped/`, produced by
-`scripts/sync-rabbit-derived.sh`: probe `retarget` onto the **biped_rabbit** rig
-(inserts the shoulder/pelvis struts, re-authors rotations, verifies world
-directions are preserved) followed by `bakeyaw` (pseudo-3D strut stretch from
-the leg/arm scissor — see `Plans/ANIMATION_STRETCH_AND_REFERENCE.md`).
+`scripts/sync-rabbit-derived.sh` now regenerates the live pool,
+`SkeletonStates/biped_rabbit/`, directly from `SkeletonStates/biped/` (probe
+`retarget` + `bakeyaw`), keeping only the clips named in the script's `KEEP`
+list (stairs, stepup) hand-authored.
 
-- **Edit the biped clip and resync** — a resync overwrites every clip in this
-  directory. Hand edits here are lost on the next sync.
-- The hand-authored rabbit pool stays `SkeletonStates/biped_rabbit/` (clips that
-  have deliberately diverged from biped: the re-authored stepup, the ground
-  combo presentation pass). Promote a derived clip there when it needs manual
-  work; from then on it is maintained by hand.
-- Inspect with the probe: `dotnet MTile.Probe/bin/Debug/net8.0/MTile.Probe.dll
-  --rig biped_rabbit --dir rabbit_derived digest <clip>`.
+Pass a directory name to write a throwaway side pool here instead, for
+comparison: `scripts/sync-rabbit-derived.sh rabbit_derived`. Nothing in the game
+loads this directory.

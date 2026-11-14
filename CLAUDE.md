@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A 2D platformer in C#/MonoGame built around "the terrain IS the weapon": the player slashes, stabs, pulses, and erupts blocks to reshape a chunked tile world while moving through it. Fixed timestep of 60 fps (`Simulation.FixedDt`).
+A 2D platformer in C#/MonoGame built around free movement and editable terrain. The player slashes, stabs, pulses, and erupts blocks to reshape a chunked tile world while moving through it. Fixed timestep of 60 fps (`Simulation.FixedDt`).
 
 **Read [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md) first** — it is the authoritative architecture doc (sim/ECS/rollback, physics, character FSMs, combat, world/tiles, animation, drawing). This file covers build/run/test mechanics, project layout, and the conventions that bite hardest. Design notes and roadmaps live in [Plans/](Plans/).
 

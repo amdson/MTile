@@ -113,12 +113,12 @@ public class CharacterAnimatorTests
         var anim = RealAnimator();
         Fall(anim, 5);
 
-        for (int i = 0; i < 13; i++)   // ≈0.217s, inside the 0.25s window
+        for (int i = 0; i < 13; i++)   // ≈0.217s, inside the 0.30s window
         {
             Ground(anim, 0f);
             Assert.Equal(AnimClip.Land, anim.State.Clip);
         }
-        for (int i = 0; i < 4; i++) Ground(anim, 0f);   // carry past the window
+        for (int i = 0; i < 7; i++) Ground(anim, 0f);   // carry past the window
         Assert.Equal(AnimClip.Idle, anim.State.Clip);
     }
 

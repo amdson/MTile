@@ -3,7 +3,7 @@ using Microsoft.Xna.Framework;
 
 namespace MTile.Net;
 
-// Terrain reads shared by the block-offense maneuvers (Eruption, BlockBurst). Private to
+// Terrain reads shared by the block-offense maneuvers (Eruption). Private to
 // these maneuvers rather than on BotView so the parallel bot work merges cleanly; a
 // candidate to promote onto BotView later.
 internal static class BotTerrainSense

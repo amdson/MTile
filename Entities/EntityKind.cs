@@ -151,6 +151,12 @@ public enum EntityKind
     StormBomb,      // Stormcaller ordnance (StormBombProjectile)
     StormBeam,      // Stormcaller run-phase beam of wind (StormBeam)
     StormIce,       // Stormcaller ice field (StormIceField)
+
+    // Frog Swarm — a boss that is a crowd of one-block frogs that rest, hop and divide
+    // (up to a cap). FrogMutant is the kamikaze variant a split sometimes produces.
+    // Both are FrogEnemy; see Entities/Enemies/Types/FrogEnemy.cs.
+    Frog,
+    FrogMutant,
 }
 
 public static class EntityKinds

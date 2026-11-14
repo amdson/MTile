@@ -364,33 +364,49 @@ public sealed class ActionAimConstraint : ISolveConstraint
 {
     public string Name => "ActionAimConstraint";
 
+    // One row per aimed tip: the clip's pair, plus an optional second tip from the same origin
+    // (SolveProblem.AimBoneR2 — a two-armed hold aims both hands).
     public int Residuals(SolveProblem p, PoseEval e, ReadOnlySpan<float> x, Span<float> r)
     {
         if (!p.AimActive) return 0;
+        r[0] = Residual(p, e, p.AimBoneR, p.AimTarget);
+        if (p.AimBoneR2 < 0) return 1;
+        r[1] = Residual(p, e, p.AimBoneR2, p.AimTarget2);
+        return 2;
+    }
+
+    private static float Residual(SolveProblem p, PoseEval e, int tipBone, Vector2 u)
+    {
         Vector2 pL = e.Pose.WorldOf(p.AimBoneL).Translation;
-        Vector2 pR = e.Pose.WorldOf(p.AimBoneR).Translation;
-        Vector2 v = pR - pL, u = p.AimTarget;
+        Vector2 pR = e.Pose.WorldOf(tipBone).Translation;
+        Vector2 v = pR - pL;
         float c = v.X * u.Y - v.Y * u.X;   // cross
         float d = v.X * u.X + v.Y * u.Y;   // dot
-        float sw = MathF.Sqrt(p.Cfg.TierAim);
-        r[0] = sw * MathF.Atan2(c, d);     // signed angle(v, û*); 0 ⇔ parallel, ±π ⇔ antiparallel (a max)
-        return 1;
+        return MathF.Sqrt(p.Cfg.TierAim) * MathF.Atan2(c, d);   // signed angle(v, û*); 0 ⇔ parallel, ±π ⇔ antiparallel (a max)
     }
 
     public int Jacobian(SolveProblem p, PoseEval e, ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
     {
         if (!p.AimActive) return 0;
+        JacobianRow(p, e, p.AimBoneR, p.AimTarget, jac, stride, row0);
+        if (p.AimBoneR2 < 0) return 1;
+        JacobianRow(p, e, p.AimBoneR2, p.AimTarget2, jac, stride, row0 + 1);
+        return 2;
+    }
+
+    private static void JacobianRow(SolveProblem p, PoseEval e, int tipBone, Vector2 u, Span<float> jac, int stride, int row)
+    {
         int nv = p.Vars;
         var cxR = e.ColX.AsSpan(0, nv);  var cyR = e.ColY.AsSpan(0, nv);
         var cxL = e.ColX2.AsSpan(0, nv); var cyL = e.ColY2.AsSpan(0, nv);
-        Vector2 pR = e.Pose.WorldOf(p.AimBoneR).Translation;
+        Vector2 pR = e.Pose.WorldOf(tipBone).Translation;
         Vector2 pL = e.Pose.WorldOf(p.AimBoneL).Translation;
-        SolveObjective.PointJacobianColumns(p, e, p.AimBoneR, pR, cxR, cyR);   // ∂pR/∂x
+        SolveObjective.PointJacobianColumns(p, e, tipBone, pR, cxR, cyR);      // ∂pR/∂x
         SolveObjective.PointJacobianColumns(p, e, p.AimBoneL, pL, cxL, cyL);   // ∂pL/∂x
-        Vector2 v = pR - pL, u = p.AimTarget;
+        Vector2 v = pR - pL;
         float c = v.X * u.Y - v.Y * u.X, d = v.X * u.X + v.Y * u.Y;
         float denom = c * c + d * d;       // = |v|² (û* unit); the d(atan2) normalizer
-        if (denom < 1e-9f) return 1;        // hands coincident — leave the row at 0
+        if (denom < 1e-9f) return;          // tips coincident — leave the row at 0
         float sw = MathF.Sqrt(p.Cfg.TierAim) / denom;
         // θ = atan2(c, d) ⇒ ∂θ/∂x_k = (d·∂c − c·∂d)/(c²+d²), with ∂v = ∂pR − ∂pL.
         for (int k = 0; k < nv; k++)
@@ -398,9 +414,8 @@ public sealed class ActionAimConstraint : ISolveConstraint
             float dvx = cxR[k] - cxL[k], dvy = cyR[k] - cyL[k];
             float dc = dvx * u.Y - dvy * u.X;   // ∂(cross)
             float dd = dvx * u.X + dvy * u.Y;   // ∂(dot)
-            jac[row0 * stride + k] = sw * (d * dc - c * dd);
+            jac[row * stride + k] = sw * (d * dc - c * dd);
         }
-        return 1;
     }
 }
 

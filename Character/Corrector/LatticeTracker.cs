@@ -84,7 +84,7 @@ public static class LatticeTracker
         bool bonk = false;
         int count = planning
             ? s.Lattice.Solve(ctx.Chunks, body.Polygon, body.Position, body.Velocity,
-                u, fold.Hover, fold.HoverOffset, fold.RiseCost,
+                u, fold.Hover, fold.HoverOffset, fold.RiseCost, fold.RecoverCost,
                 s.LatticePath, out _, out bonk)
             : 0;
         // Freshness markers for render-side path consumers (LatticePathSampler) —

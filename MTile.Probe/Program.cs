@@ -647,10 +647,10 @@ static class Probe
     // generated pools like rabbit_derived/). Name a clip when porting one new authoring:
     // the pool form OVERWRITES every destination clip, including ones re-authored since.
     //
-    // Assumption: inserted bones are never animated — they hold their bind rotation.
-    // Authored rotations are FULL local angles, so a bone whose parent chain gained
-    // inserted ancestors re-authors as r_new = WrapAngle(r_old − Σ inserted bind
-    // rotations); every other channel (timing, contacts, com additions, ExtraBones)
+    // Inserted struts are keyed to hold their bind WORLD direction (the level rule, see
+    // below); inserted leaves hold their bind rotation. Authored rotations are FULL local
+    // angles, so a bone whose parent chain gained inserted ancestors re-authors as
+    // r_new = WrapAngle(r_old − Σ inserted ancestors' rotations); every other channel (timing, contacts, com additions, ExtraBones)
     // copies through untouched. Verified per keyframe by comparing every shared bone's
     // world DIRECTION across the two rigs — positions legitimately shift by the strut
     // geometry, directions must not.
@@ -679,6 +679,16 @@ static class Probe
                 Console.WriteLine($"# {dst.Bones[i].Name,-14} rotation offset {-off:+0.0000;-0.0000} rad");
         }
 
+        // Struts: inserted bones that sit BETWEEN shared bones (a shared bone hangs below
+        // them). Inserted leaves (the rabbit's feet) are not struts and stay at bind.
+        var isStrut = new bool[dst.Count];
+        for (int i = 0; i < dst.Count; i++)
+        {
+            if (_rig.IndexOf(dst.Bones[i].Name) < 0) continue;
+            for (int q = dst.Bones[i].Parent; q >= 0 && _rig.IndexOf(dst.Bones[q].Name) < 0; q = dst.Bones[q].Parent)
+                isStrut[q] = dst.Bones[q].Parent >= 0 && _rig.IndexOf(dst.Bones[dst.Bones[q].Parent].Name) >= 0;
+        }
+
         var srcPose = _rig.CreatePose();
         var dstPose = dst.CreatePose();
         float worstDir = 0f; string worstAt = "-";
@@ -692,12 +702,46 @@ static class Probe
             {
                 orig[kf] = kf.Bones?.ConvertAll(b => new PoseBoneEntry { Bone = b.Bone, Rotation = b.Rotation, Stretch = b.Stretch });
                 if (kf.Bones == null) continue;
+
+                // LEVEL RULE: a strut (an inserted bone with shared bones below it) is the
+                // body's left-right axis seen at an angle. Pitching the torso/pelvis turns
+                // about that very axis, so the strut's on-screen direction must not follow
+                // its parent's lean — it keeps its bind WORLD direction. Left at its bind
+                // LOCAL rotation it swings with the chest like a T-bar, and a forward lean
+                // puts one shoulder at the neck and the other at the waist. So each strut
+                // is keyed to cancel its parent's world rotation away from bind, and the
+                // bones below it re-author against that keyed value.
+                var srcRot = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+                foreach (var e in kf.Bones) srcRot[e.Bone] = e.Rotation;
+                float LeanOf(int srcIdx)   // world rotation away from bind, down the chain
+                {
+                    float lean = 0f;
+                    for (int b = srcIdx; b >= 0; b = _rig.Bones[b].Parent)
+                        if (srcRot.TryGetValue(_rig.Bones[b].Name, out float r))
+                            lean += r - _rig.Bones[b].Rotation;
+                    return lean;
+                }
+                var strutRot = new float[dst.Count];
+                var strutKeys = new List<PoseBoneEntry>();
+                for (int i = 0; i < dst.Count; i++)
+                {
+                    if (!isStrut[i]) continue;
+                    int sp = _rig.IndexOf(dst.Bones[dst.Bones[i].Parent].Name);
+                    strutRot[i] = dst.Bones[i].Rotation - (sp >= 0 ? LeanOf(sp) : 0f);
+                    strutKeys.Add(new PoseBoneEntry { Bone = dst.Bones[i].Name, Rotation = MathHelper.WrapAngle(strutRot[i]) });
+                }
                 foreach (var e in kf.Bones)
                 {
                     int di = dst.IndexOf(e.Bone);
-                    if (di < 0 || offsets[di] == 0f) continue;
-                    e.Rotation = MathHelper.WrapAngle(e.Rotation - offsets[di]);
+                    if (di < 0) continue;
+                    int dp = dst.Bones[di].Parent;
+                    if (dp < 0 || _rig.IndexOf(dst.Bones[dp].Name) >= 0) continue;   // no inserted parent
+                    float off = 0f;
+                    for (int q = dst.Bones[di].Parent; q >= 0 && _rig.IndexOf(dst.Bones[q].Name) < 0; q = dst.Bones[q].Parent)
+                        off += isStrut[q] ? strutRot[q] : dst.Bones[q].Rotation;
+                    e.Rotation = MathHelper.WrapAngle(e.Rotation - off);
                 }
+                kf.Bones.AddRange(strutKeys);
             }
 
             // Verify: same world direction for every shared bone at every keyframe.
@@ -829,7 +873,7 @@ static class Probe
         return (File.Exists(path) ? HermiteClipDocument.Load(path) : null) ?? ReferenceClipRegistry.Get(name);
     }
 
-    // bakeyaw [clip] [--view deg] [--swap s] [--ref rad] [--noshoulders] [--dry]
+    // bakeyaw [clip] [--turn] [--view deg] [--swap s] [--ref rad] [--noshoulders] [--dry]
     //
     // Pseudo-3D pelvis rotation: as the legs scissor, the pelvis yaws about the implicit
     // depth axis, so in side view the hip sockets (strut tips) slide toward the centerline
@@ -861,6 +905,41 @@ static class Probe
         float psiA      = MathF.Acos(MathHelper.Clamp(swap * MathF.Cos(psi0), -1f, 1f)) - psi0;
         float Project(float chiHat) => MathF.Cos(psi0 - psiA * chiHat) / MathF.Cos(psi0);
 
+        // --turn: the ORDER law, for stances and strikes (anything that is not a gait
+        // cycle). The source rig is a pure profile where "left" and "right" limbs share
+        // one socket and carry no depth meaning; on a strutted rig the _r side is the
+        // near/front socket and _l the far/back one. So whenever a clip puts its _l hand
+        // (foot) AHEAD of its _r one, the limbs attach on the wrong sides and cross the
+        // body. A real body in that pose has simply turned: the side whose limb leads is
+        // the front side. Law: with d = how far the _r limb tip leads the _l one (each
+        // measured from its own socket, so the strut width itself cancels),
+        //     s = clamp(1 + 2d/ref, −1, 1),   ref = 4 × strut length
+        // — full authored width while _r leads or the tips are level, collapsing through
+        // the centerline as _l takes the lead, fully mirrored once _l leads by ref.
+        bool turn = HasFlag(args, "--turn");
+        float Lead(Affine2[] w, string tipR, string strutR, string tipL, string strutL)
+        {
+            int tr = _rig.IndexOf(tipR), sr = _rig.IndexOf(strutR), tl = _rig.IndexOf(tipL), sl = _rig.IndexOf(strutL);
+            return (w[tr].Translation.X - w[sr].Translation.X) - (w[tl].Translation.X - w[sl].Translation.X);
+        }
+        float Turn(Affine2[] w, string tipR, string strutR, string tipL, string strutL)
+            => MathHelper.Clamp(1f + 2f * Lead(w, tipR, strutR, tipL, strutL) / (4f * _rig.Bones[_rig.IndexOf(strutR)].Length), -1f, 1f);
+        // Even in a gait clip, a limb pair that does not SWING is not a scissor (crouchwalk
+        // carries its arms in a fixed guard while the legs cycle): the yaw law has nothing
+        // to read there, so a pair whose lead varies by less than half its ref over the
+        // clip takes the order law instead.
+        bool Held(AnimationDocument clip, SkeletonPose p, string tipR, string strutR, string tipL, string strutL)
+        {
+            float lo = float.MaxValue, hi = float.MinValue;
+            foreach (var kf in clip.Keyframes)
+            {
+                PoseData.Apply(kf.Bones, p);
+                float d = Lead(p.ComputeWorld(Affine2.Identity), tipR, strutR, tipL, strutL);
+                lo = MathF.Min(lo, d); hi = MathF.Max(hi, d);
+            }
+            return hi - lo < 2f * _rig.Bones[_rig.IndexOf(strutR)].Length;
+        }
+
         string only = null;
         for (int ai = 1; ai < args.Length; ai++)
         {
@@ -877,19 +956,21 @@ static class Probe
         foreach (var clip in clips)
         {
             var line = new StringBuilder($"{clip.Name,-18}");
+            bool turnLegs = turn || Held(clip, pose, "leg_r_lower", "hip_r", "leg_l_lower", "hip_l");
+            bool turnArms = shoulders && (turn || Held(clip, pose, "arm_r_lower", "shoulder_r", "arm_l_lower", "shoulder_l"));
             foreach (var kf in clip.Keyframes)
             {
                 PoseData.Apply(kf.Bones, pose);
                 var w = pose.ComputeWorld(Affine2.Identity);
                 float chiLeg = MathHelper.Clamp((Alpha(w, "leg_r_upper") - Alpha(w, "leg_l_upper")) / refAmp, -1f, 1f);
-                float sHip = Project(chiLeg);
+                float sHip = turnLegs ? Turn(w, "leg_r_lower", "hip_r", "leg_l_lower", "hip_l") : Project(chiLeg);
                 SetStretch(kf, "hip_l", sHip);
                 SetStretch(kf, "hip_r", sHip);
                 line.Append($"  {kf.Time:0.00}:χ{chiLeg,5:+0.00;-0.00}→{sHip,5:+0.00;-0.00}");
                 if (shoulders)
                 {
                     float chiArm = MathHelper.Clamp((Alpha(w, "arm_r_upper") - Alpha(w, "arm_l_upper")) / refAmp, -1f, 1f);
-                    float sSh = Project(chiArm * shAmp);
+                    float sSh = turnArms ? Turn(w, "arm_r_lower", "shoulder_r", "arm_l_lower", "shoulder_l") : Project(chiArm * shAmp);
                     SetStretch(kf, "shoulder_l", sSh);
                     SetStretch(kf, "shoulder_r", sSh);
                     line.Append($"/sh{sSh,5:+0.00;-0.00}");

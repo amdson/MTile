@@ -257,17 +257,35 @@ public class MovementConfig
     // Climb band of the LatticePlanner PROTOTYPE oracle (Game1's freeze-frame
     // overlay) — the live engine prices climbs with FoldRiseCost instead.
     public float FoldClimbReachUp               { get; set; } = 20f;
-    // Lattice engine (FoldProfile.RiseCost): the state's price per px CLIMBED
-    // on the planned path, traded against LatticeProgressWeight at the goal;
-    // drops are free (gravity delivers them). The binding case is the body
-    // PRESSED AGAINST the obstacle, where standing still earns nothing and
-    // the window's whole progress (7 × 56 = 392) is the climb's reward:
-    // Standing 16 buys a climb ceiling of 392/16 ≈ 24.5 px — it mounts a
-    // 2-tile (22 px) step (352 < 392) and refuses a 3-tile (33 px) wall
-    // (528 > 392); Crouch 30 refuses the 2-tile step too (660 > 392) — a
-    // crouch does not mount ledges. The ceiling is in PX and unchanged by
-    // Chunk.TileSize; only the tile counts it corresponds to moved.
-    public float FoldRiseCost                   { get; set; } = 16f;
+    // Lattice engine (FoldProfile.RiseCost / RecoverCost): the state's prices
+    // per px CLIMBED on the planned path, traded against LatticeProgressWeight
+    // at the goal; drops are free (gravity delivers them). The climb is split
+    // at the hover height (2026-11-12): the walk owns 1-tile steps, the climb
+    // states own everything taller.
+    //   FoldRecoverCost  px climbed up TO hover height — the body standing
+    //                    back up after the floor rose under it. Rising a sag s
+    //                    costs Recover·s once; staying sagged across a feature
+    //                    w px wide costs LatticeHoverWeight·s·w. So the body
+    //                    rises for any feature wider than Recover/HoverWeight
+    //                    (4/0.4 = 10 px), whatever its height: a single block
+    //                    (≈21 px in C-space) is ridden over, a one-tile gap
+    //                    between ceiling bumps (≈1 px) is not stood up in.
+    //   FoldRiseCost     px climbed more than one lattice cell (≈3.7 px)
+    //                    BEYOND hover height. The cell of slack lets the path
+    //                    start rising just before a block (measured: the body
+    //                    lifts 5.5 px over a single block with it, 3.5 px
+    //                    without). A 1-tile (11 px) step never pays this
+    //                    price (hover 14.8 clears it); a 2-tile (22 px) step
+    //                    needs 7.2 px beyond hover, ≈3.5 px past the slack.
+    //                    Pressed against the obstacle the window's whole
+    //                    progress (7 × 56 = 392) is the climb's reward, so
+    //                    120 buys 392/120 ≈ 3.3 px — the walk refuses every
+    //                    step of 2 tiles or more. With no cap at all (4 for
+    //                    every px) the walk mounts a 2-tile step on its own.
+    // Crouch 30 (both halves; its hover is 0) still mounts nothing taller
+    // than a tile. All in PX: unchanged by Chunk.TileSize.
+    public float FoldRiseCost                   { get; set; } = 120f;
+    public float FoldRecoverCost                { get; set; } = 4f;
     public float CrouchRiseCost                 { get; set; } = 30f;
     // Fixed inner iteration budget of the per-tick fold solve (determinism
     // requires it fixed; raise for convergence, costs linearly).

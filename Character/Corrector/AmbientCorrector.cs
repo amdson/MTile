@@ -18,6 +18,10 @@ public struct FoldProfile
     // this is what decides what a state will and won't climb — a crouch's
     // is high enough that no ledge is ever worth it (LATTICE_SCENARIOS.md).
     public float RiseCost;
+    // Lattice engine: the price per px climbed up TO the hover height (the
+    // body standing back up after the floor rose under it). RiseCost prices
+    // only what is climbed beyond it. Hover-off profiles never read this.
+    public float RecoverCost;
     // Lattice engine: hover cost on (the fold states ride a surface) or off
     // (jump states: an airborne seed must not be dragged to the floor).
     public bool  Hover;
@@ -60,6 +64,7 @@ public struct FoldProfile
         HoverOffset  = MovementConfig.Current.FoldHoverOffset,
         MaxSpeed     = MovementConfig.Current.MaxWalkSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
+        RecoverCost  = MovementConfig.Current.FoldRecoverCost,
         Hover        = true,
     };
 
@@ -70,7 +75,7 @@ public struct FoldProfile
     // with 190 px/s vertical spikes; RiseCost 0 rides 18 px, a steady 70 px/s glide).
     public static FoldProfile Stairs
     {
-        get { var p = Stand; p.RiseCost = 0f; return p; }
+        get { var p = Stand; p.RiseCost = 0f; p.RecoverCost = 0f; return p; }
     }
 
     // Crouched: same fold, lower reference — the crouch IS reference shaping,
@@ -83,6 +88,7 @@ public struct FoldProfile
         HoverOffset  = MovementConfig.Current.CrouchHoverOffset,
         MaxSpeed     = MovementConfig.Current.CrouchMaxWalkSpeed,
         RiseCost     = MovementConfig.Current.CrouchRiseCost,
+        RecoverCost  = MovementConfig.Current.CrouchRiseCost,
         Hover        = true,
     };
 }

@@ -48,7 +48,7 @@ public class TwoHighCorridorEntryTests(ITestOutputHelper output)
                 foreach (bool hover in new[] { true, false })
                 {
                     int n = planner.Solve(Terrain(0), body, seed, new Vector2(100, 0), Vector2.UnitX,
-                        hover, cfg.FoldHoverOffset, cfg.FoldRiseCost, path, out _, out bool bonk);
+                        hover, cfg.FoldHoverOffset, cfg.FoldRiseCost, cfg.FoldRecoverCost, path, out _, out bool bonk);
                     float advance = n > 0 ? path[n-1].Pos.X - seed.X : 0;
                     output.WriteLine($"cells={cells} hover={hover} totalMargin={(float)Ts/cells:F3} n={n} advance={advance:F2} bonk={bonk}");
                 }

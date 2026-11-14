@@ -75,6 +75,7 @@ public class Game1 : Game
     private GlowRenderer _glow;
     private DevDemoRenderer _devDemos;
     private ChunkRenderer _chunkRenderer;
+    private BlobShadowRenderer _blobShadows;
     // Launched-avalanche fill zone (render-only look-ahead, offline only). _lastP2Input is
     // the bot's last sample, which the look-ahead holds frozen.
     private readonly AvalancheForecast _avalancheForecast = new();
@@ -678,7 +679,7 @@ public class Game1 : Game
         _latticePathCount = _config.FreezeFrameInputX == 0 ? 0 : _latticePath.Solve(
             _sim.Chunks, body.Polygon, body.Position, body.Velocity,
             new Vector2(Math.Sign(_config.FreezeFrameInputX), 0f),
-            hover: true, mc.FoldHoverOffset, mc.FoldRiseCost,
+            hover: true, mc.FoldHoverOffset, mc.FoldRiseCost, mc.FoldRecoverCost,
             _latticePathBuf, out _, out _);
 
         _sim.Player.CorrectorDebug.CaptureTrajectories = true;
@@ -728,6 +729,7 @@ public class Game1 : Game
         _glow = new GlowRenderer(GraphicsDevice);
         _devDemos = new DevDemoRenderer(_prims, _density, _metaballs, _glow);
         _chunkRenderer = new ChunkRenderer(_spriteBatch, _pixel, _camera, GraphicsDevice);
+        _blobShadows = new BlobShadowRenderer(_spriteBatch, _camera, GraphicsDevice);
         // Rock grain for tile fills — same raw-PNG loading rules as the backdrop below.
         try
         {
@@ -1246,7 +1248,10 @@ public class Game1 : Game
         // GPU work — SpriteBatch is deferred, so the actual submission lands in the
         // `present` scope at the closing End(). Read them as "managed cost per pass".
         using (_prof.Measure(_sChunks))
+        {
             _chunkRenderer.Draw(_sim, (float)gameTime.TotalGameTime.TotalSeconds);
+            _blobShadows.Draw(_sim);
+        }
 
         long tEnt = _prof.Begin();
         // Entities before the player so the player overlays them when they overlap.
@@ -1294,7 +1299,9 @@ public class Game1 : Game
                 var rootXf = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale));
                 _elements.Update(player, skin0, _animator.Pose, rootXf, frameDt, _elementSolid);
                 _elements.Draw(cam, player, skin0.Elements, front: false);
-                skin0.Draw(cam, _animator.Pose, rootXf, flash: _hitFlash.Intensity(player.Id));
+                // The skin alone squashes through a turning clip's mirror (TurnScale).
+                var skinXf0 = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale * _animator.TurnScale, SkeletonScale));
+                skin0.Draw(cam, _animator.Pose, skinXf0, flash: _hitFlash.Intensity(player.Id), front: _animator.FrontBones);
                 _elements.Draw(cam, player, skin0.Elements, front: true);
             }
             for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
@@ -1311,7 +1318,8 @@ public class Game1 : Game
                 var rootXf = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale));
                 _elements.Update(p, skin, anim.Pose, rootXf, frameDt, _elementSolid);
                 _elements.Draw(cam, p, skin.Elements, front: false);
-                skin.Draw(cam, anim.Pose, rootXf, flash: _hitFlash.Intensity(p.Id));
+                var skinXf = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale * anim.TurnScale, SkeletonScale));
+                skin.Draw(cam, anim.Pose, skinXf, flash: _hitFlash.Intensity(p.Id), front: anim.FrontBones);
                 _elements.Draw(cam, p, skin.Elements, front: true);
             }
             if (split) _spriteBatch.Begin(transformMatrix: cam);

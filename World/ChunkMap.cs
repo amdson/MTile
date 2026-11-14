@@ -552,8 +552,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     }
 
     // True iff TryRequestTile would create a node here: the cell is free AND has
-    // something (Solid face or existing sprout) to build from. Pure query — it is how
-    // BlockBurstAction tells "RMB is painting this cell" from "RMB is over dead air".
+    // something (Solid face or existing sprout) to build from. Pure query.
     public bool CanRequestTile(int gtx, int gty)
         => GetCellState(gtx, gty).IsOpen()
         && !Graph.TryGet(gtx, gty, out _)
@@ -561,7 +560,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
 
     // Sprout a cell with NO support — the one path that skips the "must touch solid or
     // an existing sprout" rule. Conjuring matter out of nothing is a deliberate ability
-    // (BlockBurstAction), not something the ordinary build gesture may do, so it lives
+    // (the enemy builders'; the player's BlockBurstAction, removed 2026-11-13, was the other
+    // caller), not something the ordinary build gesture may do, so it lives
     // in its own method rather than as a flag on TryRequestTile.
     //
     // Faces: any real solid support is honoured, so a burst that clips terrain grows out

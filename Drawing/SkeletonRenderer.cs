@@ -10,6 +10,26 @@ public struct SkeletonDrawStyle
     public Color RootColor;
     public float BoneThickness;
     public float JointRadius;
+    // Optional side coding: when set, joints of left-side bones (name has "_l") draw in
+    // LeftJointColor and right-side ones ("_r") in RightJointColor. Null = JointColor.
+    public Color? LeftJointColor;
+    public Color? RightJointColor;
+
+    // Blue = left (the far side on strutted rigs), red = right (the near side).
+    public static readonly Color SideLeft  = new(70, 150, 255);
+    public static readonly Color SideRight = new(255, 70, 70);
+
+    // -1 left, +1 right, 0 centre — from the bone-name convention (arm_l_upper, hip_r, foot_l).
+    public static int SideOf(string bone)
+        => bone.EndsWith("_l") || bone.Contains("_l_") ? -1
+         : bone.EndsWith("_r") || bone.Contains("_r_") ? +1 : 0;
+
+    public readonly Color JointColorFor(string bone) => SideOf(bone) switch
+    {
+        -1 => LeftJointColor  ?? JointColor,
+        +1 => RightJointColor ?? JointColor,
+        _  => JointColor,
+    };
 
     public static SkeletonDrawStyle Default => new()
     {
@@ -53,7 +73,7 @@ public static class SkeletonRenderer
         if (style.JointRadius > 0f)
             for (int i = 0; i < bones.Length; i++)
             {
-                Color c = bones[i].IsRoot ? style.RootColor : style.JointColor;
+                Color c = bones[i].IsRoot ? style.RootColor : style.JointColorFor(bones[i].Name);
                 ctx.Disc(world[i].Translation, style.JointRadius, c);
             }
     }

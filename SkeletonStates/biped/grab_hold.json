@@ -20,6 +20,9 @@
       }
     ]
   },
+  "AimFrom": "chest",
+  "AimTo": "arm_r_lower",
+  "AimTo2": "arm_l_lower",
   "Keyframes": [
     {
       "Time": 0.0,

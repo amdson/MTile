@@ -5,7 +5,8 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
-// Top-of-screen health bars for major bosses (EnemyEntity.BossTitle != null): the name,
+// Top-of-screen health bars for major bosses (EnemyEntity.BossTitle != null, or the
+// members of an ISwarmBoss, which share one bar showing how many are alive): the name,
 // then a wide bar centred under it. Lost health first shows as a pale chunk that drains
 // after a short hold, so a hit reads as a bite out of the bar. A boss with a shield pool
 // (Quillback's shell) gets a thin bar above its health. Several live bosses stack.
@@ -43,14 +44,32 @@ public sealed class BossBarHud
         int y    = Top;
         bool begun = false;
 
+        // A swarm boss (ISwarmBoss) is one bar for all its members: live count over the cap.
+        string swarmTitle = null; int swarmLive = 0, swarmCap = 1; EntityId swarmKey = default;
+
         foreach (var e in entities)
         {
-            if (e.IsDead || e is not EnemyEntity en || en.BossTitle is not { Length: > 0 } title) continue;
-            if (!begun) { sb.Begin(); begun = true; }
-            _live.Add(e.Id);
-
+            if (e.IsDead) continue;
+            if (e is ISwarmBoss sw)
+            {
+                // Keyed on the first member seen; a rekey when it dies just snaps the trail.
+                if (swarmTitle == null) { swarmTitle = sw.SwarmTitle; swarmCap = Math.Max(1, sw.SwarmCap); swarmKey = e.Id; }
+                if (sw.SwarmTitle == swarmTitle) swarmLive++;
+                continue;
+            }
+            if (e is not EnemyEntity en || en.BossTitle is not { Length: > 0 } title) continue;
             float frac = e.MaxHealth > 0f ? MathHelper.Clamp(e.Health / e.MaxHealth, 0f, 1f) : 0f;
-            if (!_lag.TryGetValue(e.Id, out var lag)) _lag[e.Id] = lag = new Lag();
+            Bar(e.Id, title, frac, en.BossShieldFraction);
+        }
+        if (swarmTitle != null)
+            Bar(swarmKey, $"{swarmTitle}  {swarmLive}/{swarmCap}", MathHelper.Clamp(swarmLive / (float)swarmCap, 0f, 1f), -1f);
+
+        void Bar(EntityId id, string title, float frac, float shield)
+        {
+            if (!begun) { sb.Begin(); begun = true; }
+            _live.Add(id);
+
+            if (!_lag.TryGetValue(id, out var lag)) _lag[id] = lag = new Lag();
             if (!lag.Seen || frac >= lag.Frac) { lag.Frac = frac; lag.Hold = 0f; lag.Seen = true; }
             else if (lag.Hold < TrailHold) lag.Hold += dt;
             else lag.Frac = MathF.Max(frac, lag.Frac - TrailRate * dt);
@@ -61,7 +80,6 @@ public sealed class BossBarHud
             sb.DrawString(font, title, namePos, new Color(230, 230, 236));
             y += font.LineSpacing + 2;
 
-            float shield = en.BossShieldFraction;
             if (shield >= 0f)
             {
                 sb.Draw(pixel, new Rectangle(x, y, barW, ShieldH), Back);

@@ -163,7 +163,7 @@ public class EnemyPlaceBlockAction : EnemyActionState
 
 // Conjure one tile at the point the brain aims at (AimWorld at Enter, pulled in to
 // MaxRange from the body — the same rule as a summoned mine). Needs no line of sight and
-// no support (ChunkMap.ForceSprout, the unsupported-sprout path BlockBurstAction uses) —
+// no support (ChunkMap.ForceSprout, the unsupported-sprout path) —
 // that is the point premium over PlaceBlock. Anywhere: a wall between you and a charger,
 // a ceiling over a jumper, a step up a ledge. The windup's marker is public, and the
 // destination rides in the tell (TellAim). A destination that overlaps a body — the

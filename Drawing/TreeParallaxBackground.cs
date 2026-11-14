@@ -49,14 +49,35 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
     private readonly Texture2D[] _trees; // indexed by TreeType
     private readonly Texture2D _pixel;
 
+    // ---- Atmospheric perspective (retune by eye) --------------------------------
+    // The illustrated trees carry black outlines and saturated greens — more
+    // contrast than the play layer in front of them, which flattens the picture.
+    // Every plane is therefore pushed back at BAKE time (zero per-frame cost):
+    // desaturated, then lerped toward Fog, both growing with depth as
+    // t = 1 - Proj(Z) (0 at the play plane, -> 1 at the horizon), so the planes
+    // separate from each other and none of them out-contrasts the gameplay.
+    //
+    // Colour the trees fade toward. Cool and a touch green so lifted outlines land
+    // on grey-green rather than a chalky blue, and so the warm god rays still pop.
+    public Color Fog        = new Color(146, 172, 176);
+    // Fog fraction on a plane at the play depth (Z = 0): the floor every tree gets,
+    // i.e. how far the black outlines of the NEAREST trunks are lifted.
+    public const float FogNear = 0.28f;
+    // Fog fraction a plane approaches at the horizon (Z -> inf).
+    public const float FogFar  = 0.60f;
+    // Saturation removed at the play depth / at the horizon (0 = art as drawn,
+    // 1 = greyscale). Applied before the fog, so it bites the mid-tones the fog
+    // lerp leaves most colourful.
+    public const float DesatNear = 0.15f;
+    public const float DesatFar  = 0.45f;
+    // Vertical tilt of the bake-time fog: added to a layer's fog linearly
+    // with height, 0 at the strip bottom (ground line) up to +FogSlope at the top,
+    // so treetops fade into the sky first. 0 = uniform fog.
+    public float FogSlope   = 0.3f;
+    // -----------------------------------------------------------------------------
+
     public Color SkyTop     = new Color(120, 168, 214);
     public Color SkyHorizon = new Color(196, 214, 226);
-    // Distant tint trees fade toward (atmospheric perspective).
-    public Color Fog        = new Color(186, 204, 218);
-    // Vertical tilt of the bake-time fog: added to a layer's FogAmount linearly
-    // with height, 0 at the strip bottom (ground line) up to +FogSlope at the top,
-    // so treetops fade into the sky first. 0 = uniform fog (current look).
-    public float FogSlope   = 0.3f;
     public Color Grass      = new Color(74, 110, 58);
     public Color Dirt       = new Color(72, 54, 40);
     public Color DeepRock   = new Color(34, 26, 22);
@@ -95,6 +116,32 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
         return new Color((int)(c.R * k), (int)(c.G * k), (int)(c.B * k), c.A);
     }
 
+    // Depth-derived atmosphere for a plane; the layer's own FogAmount stacks on top
+    // as a per-layer art override.
+    private static float FogAt(in Layer layer, float z) =>
+        Math.Clamp(FogNear + (FogFar - FogNear) * (1f - Proj(z)) + layer.FogAmount, 0f, 1f);
+    private static float DesatAt(float z) =>
+        Math.Clamp(DesatNear + (DesatFar - DesatNear) * (1f - Proj(z)), 0f, 1f);
+
+    // Greyscale twin of a tree texture. A sprite tint can only multiply, so it
+    // can't desaturate; drawing this twin over the original at alpha d is an exact
+    // lerp toward luminance wherever the art is opaque. Luminance is linear, so
+    // this is right whether the source is straight or premultiplied alpha.
+    private Texture2D BuildGrey(Texture2D src)
+    {
+        var data = new Color[src.Width * src.Height];
+        src.GetData(data);
+        for (int i = 0; i < data.Length; i++)
+        {
+            var c = data[i];
+            byte l = (byte)((c.R * 77 + c.G * 150 + c.B * 29) >> 8);
+            data[i] = new Color(l, l, l, c.A);
+        }
+        var tex = new Texture2D(_device, src.Width, src.Height);
+        tex.SetData(data);
+        return tex;
+    }
+
     private struct Layer
     {
         public TreeType Tree;    // which tree art this layer uses
@@ -103,7 +150,7 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
         public float Spacing;    // slot spacing in WORLD px; on screen it's Spacing*Proj(Z)
         public int SlotCount;    // slots per baked strip; period = Spacing*Proj(Z)*SlotCount
         public int SkipPct;      // % of slots left empty (sparseness)
-        public float FogAmount;  // 0 = near/no fog, 1 = fully fog-colored (art choice, not derived)
+        public float FogAmount;  // EXTRA fog on top of the depth-derived FogAt (art override; 0 = none)
         public int Seed;
     }
 
@@ -712,10 +759,15 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
         Dispose();
         _strips = new RenderTarget2D[_layers.Length];
         _builtScreenH = screenH;
+        // Bake-only scratch (freed below): one grey twin per tree species.
+        var greys = new Texture2D[_trees.Length];
+        for (int i = 0; i < greys.Length; i++) greys[i] = BuildGrey(_trees[i]);
         for (int li = 0; li < _layers.Length; li++)
         {
             ref readonly var layer = ref _layers[li];
-            var tex = _trees[Math.Clamp((int)layer.Tree, 0, _trees.Length - 1)];
+            int ti = Math.Clamp((int)layer.Tree, 0, _trees.Length - 1);
+            var tex = _trees[ti];
+            var grey = greys[ti];
             float texAspect = tex.Width / (float)tex.Height;
             // Project world-space sizes to screen px at this plane's depth.
             float s = Proj(layer.Z*Z_scale);
@@ -741,6 +793,10 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
             // multiplies, so it can't lift dark texels); it's applied as a true
             // lerp by the FogLerpBlend overlay after the trees are drawn.
             var tint = Shade(Color.White, layer.Z*Z_scale);
+            // Grey twin's tint: same shade, scaled by the desaturation fraction
+            // (Color * float scales alpha too — premultiplied, as AlphaBlend wants).
+            var greyTint = tint * DesatAt(layer.Z*Z_scale);
+            float fog = FogAt(layer, layer.Z*Z_scale);
             // One seeded stream per layer, consumed at bake time only. Every slot
             // draws the SAME number of values — skipped slots included — so a
             // tree's look never depends on how many slots were skipped before it.
@@ -768,13 +824,18 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
                 // is drawn again shifted by one period so the wrap seam is sd eamless.
                 var dest = new Rectangle((int)(x - width / 2f), (int) (stripH - height),
                                          (int)width, (int)height);
-                sb.Draw(tex, dest, null, tint, 0f, Vector2.Zero, fx, 0f);
-                if (dest.Left < 0)
-                    sb.Draw(tex, new Rectangle(dest.X + stripW, dest.Y, dest.Width, dest.Height),
-                            null, tint, 0f, Vector2.Zero, fx, 0f);
-                if (dest.Right > stripW)
-                    sb.Draw(tex, new Rectangle(dest.X - stripW, dest.Y, dest.Width, dest.Height),
-                            null, tint, 0f, Vector2.Zero, fx, 0f);
+                // Each copy is the art followed immediately by its grey twin, so
+                // the desaturation belongs to THIS tree and not to whatever
+                // overlaps it later in the strip.
+                for (int shift = -1; shift <= 1; shift++)
+                {
+                    if (shift == -1 && dest.Right <= stripW) continue;
+                    if (shift == 1 && dest.Left >= 0) continue;
+                    var d = new Rectangle(dest.X + shift * stripW, dest.Y, dest.Width, dest.Height);
+                    sb.Draw(tex, d, null, tint, 0f, Vector2.Zero, fx, 0f);
+                    if (greyTint.A > 0)
+                        sb.Draw(grey, d, null, greyTint, 0f, Vector2.Zero, fx, 0f);
+                }
             }
 
             sb.End();
@@ -784,12 +845,12 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
             // FogSlope tilts the amount linearly with height: the strip bottom
             // (ground line) fogs at FogAmount, rising toward FogAmount + FogSlope
             // at the top, so treetops melt into the sky before the trunks do.
-            if (layer.FogAmount > 0f || FogSlope > 0f)
+            if (fog > 0f || FogSlope > 0f)
             {
                 sb.Begin(blendState: FogLerpBlend);
                 if (FogSlope == 0f)
                 {
-                    sb.Draw(_pixel, new Rectangle(0, 0, stripW, stripH), Fog * layer.FogAmount);
+                    sb.Draw(_pixel, new Rectangle(0, 0, stripW, stripH), Fog * fog);
                 }
                 else
                 {
@@ -797,7 +858,7 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
                     for (int y = 0; y < stripH; y += step)
                     {
                         float t = 1f - y / (float)stripH; // 1 at top, 0 at bottom
-                        float f = Math.Clamp(layer.FogAmount + FogSlope * t, 0f, 1f);
+                        float f = Math.Clamp(fog + FogSlope * t, 0f, 1f);
                         sb.Draw(_pixel, new Rectangle(0, y, stripW, Math.Min(step, stripH - y)),
                                 Fog * f);
                     }
@@ -808,6 +869,7 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
         // Backbuffer contents are undefined after the target swap, but Draw floods
         // the full screen with sky right after.
         _device.SetRenderTarget(null);
+        foreach (var g in greys) g.Dispose();
     }
 
     public void Draw(SpriteBatch sb, Camera camera, Vector2 screenCenter)
@@ -876,7 +938,10 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
 
             // This layer's terrain band first, so its trees stand on it and it hides
             // the feet of the layer behind.
-            var bandColor = Shade(Color.Lerp(Grass, Fog, layer.FogAmount), layer.Z*Z_scale);
+            // Same order as the trees standing on it: shade, then fog — fogging
+            // first would let DepthShade darken the fog itself back out.
+            var bandColor = Color.Lerp(Shade(Grass, layer.Z*Z_scale), Fog,
+                                       FogAt(layer, layer.Z*Z_scale));
             int bandTop = (int)groundY;
             if (bandTop < screenH)
                 sb.Draw(_pixel, new Rectangle(0, Math.Max(0, bandTop), screenW,

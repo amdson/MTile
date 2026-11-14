@@ -16,7 +16,7 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 | [`sync-sounds.ps1`](sync-sounds.ps1) | The same, on Windows. |
 | [`import-strip.py`](import-strip.py) | Turn a loose row of effect/sprite drawings into an Aseprite-format sheet in `Assets/AnimationEffects/` (trimmed, packed, anchors aligned on a `pivot` slice, optional `--downsample`). Prints each frame's source span — check it, and pass `--cuts` when the automatic split guesses wrong. Effects using a sheet are named in `Assets/AnimationEffects/vfx.json` (`Drawing/VfxPlayer.cs`). |
 | [`gen-tower.py`](gen-tower.py) | Regenerate the Zeus tower's terrain (`Levels/hill_*.txt`) from its geometry constants. |
-| [`sync-rabbit-derived.sh`](sync-rabbit-derived.sh) | Regenerate `SkeletonStates/rabbit_derived/` (machine-made rabbit clips) from the biped pool: probe retarget + bakeyaw. |
+| [`sync-rabbit-derived.sh`](sync-rabbit-derived.sh) | Regenerate the rabbit/badger clip pool `SkeletonStates/biped_rabbit/` from the biped pool: probe retarget + bakeyaw. Overwrites every clip except the hand-kept ones listed in the script's `KEEP` (stairs, stepup). |
 | [`competition.py`](competition.py) | Fighter competition git plumbing: `base` (cut the holdout-free base branch in a temp worktree), `worktree` (one competitor branch), `collect` (accept one-new-package branches and copy the file in, never merge), `brief` (render `Plans/FIGHTER_COMPETITOR_BRIEF.md` for a slot). See `Plans/FIGHTER_COMPETITION.md`. |
 | [`test-group.py`](test-group.py) | Run one subsystem's slice of the xUnit suite instead of all ~724 tests. `list` / `<group>` / `full`. |
 | [`vm-bootstrap.sh`](vm-bootstrap.sh) | Bootstrap a fresh Ubuntu/Debian cloud VM for headless build + test. |

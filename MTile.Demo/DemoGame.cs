@@ -1013,7 +1013,12 @@ public sealed partial class DemoGame : Game
                 // which joints belong to the active clip vs the shared base rig.
                 Color ring = !IsBaseBone(_skeleton.Bones[i].Name) ? new Color(90, 220, 230)
                            : _skeleton.Bones[i].IsRoot            ? Color.Yellow
-                                                                  : Color.OrangeRed;
+                           : SkeletonDrawStyle.SideOf(_skeleton.Bones[i].Name) switch
+                             {
+                                 -1 => SkeletonDrawStyle.SideLeft,    // blue = left / far side
+                                 +1 => SkeletonDrawStyle.SideRight,   // red  = right / near side
+                                 _  => Color.OrangeRed,
+                             };
                 _draw.Ring(p, 5f, ring, 12, 1.5f);
             }
         }

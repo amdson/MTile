@@ -197,13 +197,15 @@ public sealed class LatticePathPlanner
     private Vector2 CellCenter(int gx, int gy) => new((gx + 0.5f) * _cell, (gy + 0.5f) * _cell);
 
     // Solve. u = requested direction (unit not required; zero → no solve).
-    // hover on/off and riseCost (price per px climbed; drops are free) are
-    // the state-supplied parameters (§3.4). Returns the number of
+    // hover on/off and the two climb prices (per px climbed; drops are free)
+    // are the state-supplied parameters (§3.4): recoverCost for px climbed up
+    // to the hover height, riseCost for px climbed beyond it (and for every px
+    // when hover is off or no floor is in the window). Returns the number of
     // path samples written to outPath (body-center positions, seed → goal,
     // FloorY/Grounded filled per §3.6, Vel zero); 0 = no solve (zero u, seed
     // inside an obstacle with no not-behind free neighbour, degenerate window).
     public int Solve(ChunkMap chunks, Polygon body, Vector2 seed, Vector2 vel,
-                     Vector2 u, bool hover, float hoverOffset, float riseCost,
+                     Vector2 u, bool hover, float hoverOffset, float riseCost, float recoverCost,
                      CoastSample[] outPath, out float cost, out bool bonk)
     {
         cost = 0f; bonk = false;
@@ -296,7 +298,7 @@ public sealed class LatticePathPlanner
         Array.Sort(_orderKey, _order, 0, reachCount);
 
         // ── The DP sweep (§3.4) ──────────────────────────────────────────────
-        float wRise = riseCost;                                 // the state's price per px climbed
+        float wRise = riseCost, wRecover = recoverCost;         // the state's prices per px climbed
         var uPerp = new Vector2(-u.Y, u.X);
         // Exact prune from the argmax goal: a node's value is
         // w_prog·(p − p_seed) − dp ≤ w_prog·L − dp, so once dp exceeds
@@ -329,8 +331,24 @@ public sealed class LatticePathPlanner
                 // and three (1,1) edges cost the same 9.6 px. Drops are free:
                 // gravity delivers them, and charging them would let the
                 // argmax goal refuse to walk off a ledge.
+                // Two prices, split at the hover height: the part of the climb
+                // that ends above hover pays wRise, the part at or below it
+                // pays wRecover. A walk only ever needs the second (standing
+                // back up after the floor rose under it — onto a 1-tile step,
+                // over a block); anything that needs the first is a climb
+                // state's job, so wRise is priced out of reach. Height is
+                // measured over BOTH columns the edge touches and the larger
+                // counts: a diagonal that leaves the low floor and lands above
+                // a wall top is a climb of the wall, not a recovery on it.
+                // One cell of slack above hover is still recovery: it lets
+                // the path begin its rise a step before the block, and a cell
+                // is the height resolution anyway. The split is continuous in
+                // the body's height.
+                float rise = MathF.Max(0f, -o.Dy) * _cell, over = rise;
+                if (hover && !float.IsPositiveInfinity(_floorBelow[m]) && !float.IsPositiveInfinity(_floorBelow[n]))
+                    over = Math.Clamp(MathF.Max(_floorBelow[n] + rise, _floorBelow[m]) - hoverOffset - _cell, 0f, rise);
                 float c = dn
-                    + wRise * MathF.Max(0f, -o.Dy) * _cell
+                    + wRise * over + wRecover * (rise - over)
                     // Tie-break on excursion perpendicular to u: with hover off
                     // and rise free every route up costs the same, and the DP
                     // would zigzag a straight-up jump sideways. Negligible

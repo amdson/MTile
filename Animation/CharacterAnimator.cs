@@ -15,7 +15,7 @@ namespace MTile;
 public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, 
 DuckUnder, Jump, Fall, Parkour, Run, WallSlide, Hang, Hitstun, 
 Tumble, WallJumpKick, DoubleJump, RunTurn, Land, LedgeJump, 
-Dropdown, Mantle, ArcJump, LedgePull, StepUp, Stairs, Dash, Skid, CrouchSkid }
+Dropdown, Mantle, ArcJump, LedgePull, StepUp, Stairs, Dash, Skid, CrouchSkid, Apex, LandHard, Leap, RunStop }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -253,7 +253,9 @@ public sealed partial class CharacterAnimator
     private bool    _aimActive;
     private Vector2 _aimDir;       // world input aim direction (unit) this frame
     private int     _aimFacing;    // facing the reference rotation is measured from
-    private readonly int _aimBoneL, _aimBoneR;   // the L→R hand pair whose vector encodes the aim
+    private int _aimBoneL, _aimBoneR;            // this frame's aim pair (the clip's AimFrom → AimTo, else the hands)
+    private int _aimBoneR2 = -1;                 // the clip's optional second aimed tip (AimTo2)
+    private readonly int _aimHandL, _aimHandR;   // the default pair: the L→R hands
 
     // Cached bone indices (resolved once).
     private readonly int _hip, _chest;
@@ -381,7 +383,7 @@ public sealed partial class CharacterAnimator
 
         int I(string n) => rig.IndexOf(n);
         _hip = I("hip"); _chest = I("chest");
-        _aimBoneL = I("arm_l_lower"); _aimBoneR = I("arm_r_lower");   // the stab-aim hand pair
+        _aimHandL = _aimBoneL = I("arm_l_lower"); _aimHandR = _aimBoneR = I("arm_r_lower");   // the stab-aim hand pair
 
         // Variables: Δφ + the root offset d = (δ, d.x) + per-bone Δθ (rig.Count), with a
         // little headroom. Residuals: two rows per contact (H no-slip + V ground) + two per
@@ -392,7 +394,7 @@ public sealed partial class CharacterAnimator
         // + bones Tikhonov + bones Δθ-smoothness
         // + headroom for driver-contributed constraint blocks (FrameInputs.Constraints).
         const int MaxContributedRows = 16;
-        int nr = 2 * 4 + 2 * MaxPins + rig.Count + 1 + 4 + 2 * rig.Count + 4
+        int nr = 2 * 4 + 2 * MaxPins + rig.Count + 2 + 4 + 2 * rig.Count + 4
                + MaxContributedRows;
         _maxResiduals = nr;
         _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
@@ -477,6 +479,21 @@ public sealed partial class CharacterAnimator
     // Facing for this animator (Draw, RigRoot, skins, attachments, bone lookups).
     public int DisplayFacing => _displayFacing;
 
+    // Horizontal squash (0..1] for hosts that draw a SKIN over this rig. A turning clip
+    // mirrors the figure in one frame at FlipAt; on a stick figure that lands on a
+    // symmetric pose and is invisible, but a skin has a face and a near side, so the
+    // mirror pops. Narrowing the skin toward edge-on on the way into FlipAt and widening
+    // it out again in the new facing turns the pop into a quick turn. 1 outside a turn.
+    public float TurnScale => _turnScale;
+    private float _turnScale = 1f;
+    private const float TurnSeconds  = 0.05f;   // each side of FlipAt (3 frames)
+    private const float TurnMinScale = 0.12f;
+
+    // Bones whose skin layer should draw in front of the torso this frame (the action
+    // clip's AnimationDocument.InFront windows). Empty outside those windows.
+    public IReadOnlyList<string> FrontBones => _frontBones;
+    private readonly List<string> _frontBones = new();
+
     // The bound action clip's FlipAt (null: no such clip, or it doesn't turn).
     public float? ActionClipFlipAt(string actionType)
         => _actionClips.TryGetValue(actionType, out var clip) ? clip.FlipAt : null;
@@ -484,8 +501,18 @@ public sealed partial class CharacterAnimator
     public void Update(in CharacterAnimSample s)
     {
         int simFacing = s.Facing == 0 ? 1 : s.Facing;
-        _flipHeld = TryActionOverlay(in s, out _, out var clip, out float tau)
-                    && clip.FlipAt is float flipAt && tau < flipAt;
+        bool overlay = TryActionOverlay(in s, out _, out var clip, out float tau);
+        _flipHeld = overlay && clip.FlipAt is float flipAt && tau < flipAt;
+        _turnScale = 1f;
+        _frontBones.Clear();
+        if (overlay)
+        {
+            if (clip.FlipAt is float fa && clip.Duration > 1e-4f)
+                _turnScale = MathHelper.Clamp(MathF.Abs(tau - fa) / (TurnSeconds / clip.Duration), TurnMinScale, 1f);
+            if (clip.InFront != null)
+                foreach (var w in clip.InFront)
+                    if (tau >= w.Start && tau <= w.End && !string.IsNullOrEmpty(w.Bone)) _frontBones.Add(w.Bone);
+        }
         _displayFacing = _flipHeld ? -simFacing : simFacing;
         if (_displayFacing == s.Facing) UpdateCore(in s);
         else
@@ -609,7 +636,7 @@ public sealed partial class CharacterAnimator
         //     fixed-point pins, and (future) whole constraint blocks. FROZEN here, like every
         //     other solve input.
         _frame.Clear();
-        driver.Contribute(in s, hasClip ? SampleT(anim, in s) : 0f, _frame);
+        driver.Contribute(in s, hasClip ? SampleT(anim, in s) : 0f, in _history, _frame);
 
         // 1.5 Resolve the overlay compositor NOW, before the cadence solve, so the solve
         //     optimizes the POST-BLEND skeleton — the feet of the composed pose, not the bare
@@ -958,6 +985,19 @@ public sealed partial class CharacterAnimator
         if (clip != null && !string.IsNullOrEmpty(s.ActionVariant)
             && _actionClips.TryGetValue(VariantKey(key, s.ActionVariant), out var vc))
         { key = VariantKey(key, s.ActionVariant); clip = vc; }
+        // A variant-ONLY action: no base clip (it reads as "no action"), but a phase it names is
+        // authored — RecoveryAction's charge stance. The settle keeps priority: a press during
+        // the end-lag doesn't cut the last swing's follow-through short.
+        if (clip == null && !string.IsNullOrEmpty(s.ActionVariant) && !string.IsNullOrEmpty(s.Action)
+            && !SettleWanted(in s))
+        {
+            string vk = VariantKey(s.Action, s.ActionVariant);
+            // The grounded stance plants both feet, so it is only right standing still; on the
+            // move the "<Variant>Run" clip (upper body over the locomotion legs) takes over.
+            if (s.Grounded && MathF.Abs(s.Velocity.X) > MovingVariantSpeed
+                && _actionClips.TryGetValue(vk + "Run", out var rc)) { key = vk + "Run"; clip = rc; }
+            else if (_actionClips.TryGetValue(vk, out var bc)) { key = vk; clip = bc; }
+        }
         tau = 0f;
         if (clip == null) { key = null; return false; }
         tau = s.ActionProgress >= 0f ? MathHelper.Clamp(s.ActionProgress, 0f, 1f)
@@ -966,13 +1006,18 @@ public sealed partial class CharacterAnimator
         return true;
     }
 
+    // Ground speed (px/s) above which a variant-only action draws its "<Variant>Run" clip.
+    private const float MovingVariantSpeed = 25f;
+
     // The clip Type of an action's phase clip (ActionState.AnimationVariant).
     public static string VariantKey(string action, string variant) => action + "." + variant;
 
     private static bool IsOverlayAction(string action)
         => !string.IsNullOrEmpty(action)
            && action != "None" && action != "NullAction"
-           && action != "ReadyAction" && action != "RecoveryAction";
+           && action != "ReadyAction" && action != "RecoveryAction"
+           // Near-instant terrain gestures: no pose of their own, the movement stays on screen.
+           && action != "BlockPlaceAction" && action != "BlockPaintAction";
 
     private static float SettleShareOf(AnimationDocument clip)
         => MathHelper.Clamp(clip.SettleShare, 0f, 0.95f);
@@ -1450,6 +1495,25 @@ public sealed partial class CharacterAnimator
     private void ResolveActionAim(in CharacterAnimSample s)
     {
         _aimActive = false;
+        // The bound overlay clip may name its own aim pair (AnimationDocument.AimFrom/AimTo).
+        // Through a settle the swing's aim is held (below) — and so is the pair it aimed.
+        bool settleAim = !s.HasAim && SettleWanted(in s) && _settleHasAim;
+        if (!settleAim) { _aimBoneL = _aimHandL; _aimBoneR = _aimHandR; _aimBoneR2 = -1; }
+        // The clip on screen: the action's phase clip when it names one ("GrabAction.Hold").
+        AnimationDocument aimClip = null;
+        if (!settleAim && !string.IsNullOrEmpty(s.Action)
+            && !(s.ActionVariant != null && _actionClips.TryGetValue(VariantKey(s.Action, s.ActionVariant), out aimClip)))
+            _actionClips.TryGetValue(s.Action, out aimClip);
+        if (aimClip?.AimFrom != null && aimClip.AimTo != null)
+        {
+            int from = _skeleton.IndexOf(aimClip.AimFrom), to = _skeleton.IndexOf(aimClip.AimTo);
+            if (from >= 0 && to >= 0)
+            {
+                _aimBoneL = from; _aimBoneR = to;
+                if (aimClip.AimTo2 != null) _aimBoneR2 = _skeleton.IndexOf(aimClip.AimTo2);
+            }
+        }
+        _problem.AimBoneL = _aimBoneL; _problem.AimBoneR = _aimBoneR; _problem.AimBoneR2 = _aimBoneR2;
         if (_aimBoneL < 0 || _aimBoneR < 0) return;
         // Before a turning clip's FlipAt the rig still faces the OLD way while the aim points
         // the new one — re-aiming would wrench the windup through 180°. The aim engages at
@@ -1502,6 +1566,11 @@ public sealed partial class CharacterAnimator
         Vector2 rot = new Vector2(aRef.X * c - aRef.Y * sgn, aRef.X * sgn + aRef.Y * c);
         float len = rot.Length();
         _problem.AimTarget = len > 1e-6f ? rot / len : new Vector2(_aimFacing, 0f);
+        if (_aimBoneR2 < 0) return;
+        Vector2 aRef2 = _eval.Pose.WorldOf(_aimBoneR2).Translation - pL;
+        Vector2 rot2 = new Vector2(aRef2.X * c - aRef2.Y * sgn, aRef2.X * sgn + aRef2.Y * c);
+        float len2 = rot2.Length();
+        _problem.AimTarget2 = len2 > 1e-6f ? rot2 / len2 : new Vector2(_aimFacing, 0f);
     }
 
     private void Rot(int bone, float delta)       { if (bone >= 0) _target.Local[bone].Rotation    += delta; }

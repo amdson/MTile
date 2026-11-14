@@ -5,6 +5,7 @@ if (System.Array.IndexOf(args, "--strip") >= 0)
 {
     try
     {
+        SpriteStripGame.QuietWindow();
         using var exporter = new SpriteStripGame(args);
         exporter.Run();
     }

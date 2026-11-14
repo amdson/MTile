@@ -15,6 +15,18 @@ public sealed class ParallaxBackground : IBackdrop
     private readonly Texture2D _pixel;
     private readonly Color _ground;
 
+    // ---- Atmospheric perspective (retune by eye) --------------------------------
+    // The strip is one image at one depth, so it gets a single uniform push-back,
+    // baked into the texture once at load: no per-frame cost and no shader (a
+    // sprite tint multiplies, so it can neither desaturate nor lift the darks).
+    // Colour the strip fades toward — the same haze TreeParallaxBackground uses.
+    private static readonly Color Fog = new Color(146, 172, 176);
+    // Fraction lerped toward Fog: lifts the darks and flattens contrast.
+    private const float FogAmount = 0.35f;
+    // Saturation removed before the fog (0 = art as drawn, 1 = greyscale).
+    private const float Desaturate = 0.25f;
+    // -----------------------------------------------------------------------------
+
     public Color Sky = new Color(96, 148, 204);
     // Fraction of camera motion the strip inherits. Small = far away.
     public float ParallaxX = 0.25f;
@@ -24,12 +36,35 @@ public sealed class ParallaxBackground : IBackdrop
     {
         _tex = tex;
         _pixel = pixel;
+        ApplyAtmosphere(tex);
         // Bottom-row average = the "infinite brown" under the strip, matched to the art.
         var row = new Color[tex.Width];
         tex.GetData(0, new Rectangle(0, tex.Height - 1, tex.Width, 1), row, 0, tex.Width);
         long r = 0, g = 0, b = 0;
         foreach (var c in row) { r += c.R; g += c.G; b += c.B; }
         _ground = new Color((int)(r / tex.Width), (int)(g / tex.Width), (int)(b / tex.Width));
+    }
+
+    // Rewrites the texture in place (this class is its only user). The fog term is
+    // scaled by alpha so the transparent sky region stays transparent and
+    // antialiased ridge-line texels don't grow a fog-coloured fringe.
+    private static void ApplyAtmosphere(Texture2D tex)
+    {
+        var data = new Color[tex.Width * tex.Height];
+        tex.GetData(data);
+        for (int i = 0; i < data.Length; i++)
+        {
+            var c = data[i];
+            if (c.A == 0) continue;
+            float l = c.R * 0.299f + c.G * 0.587f + c.B * 0.114f;
+            float a = c.A / 255f * FogAmount;
+            data[i] = new Color(
+                (int)(MathHelper.Lerp(c.R, l, Desaturate) * (1f - FogAmount) + Fog.R * a),
+                (int)(MathHelper.Lerp(c.G, l, Desaturate) * (1f - FogAmount) + Fog.G * a),
+                (int)(MathHelper.Lerp(c.B, l, Desaturate) * (1f - FogAmount) + Fog.B * a),
+                c.A);
+        }
+        tex.SetData(data);
     }
 
     // Own Begin/End (screen space, wrap sampling for the horizontal tile) — call

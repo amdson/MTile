@@ -28,6 +28,7 @@ public sealed class SpriteSkin : IDisposable
     private sealed class Layer
     {
         public string    Name;
+        public SpriteSkinLayer Spec;            // for bone → layer lookups (draw-order overrides)
         public Texture2D Texture;
         public bool      OwnsTexture;
         public VertexPositionColorTexture[] Verts;
@@ -325,7 +326,7 @@ public sealed class SpriteSkin : IDisposable
 
         var layer = new Layer
         {
-            Name = spec.Name, Texture = layerTex, OwnsTexture = ownsLayerTexture,
+            Name = spec.Name, Spec = spec, Texture = layerTex, OwnsTexture = ownsLayerTexture,
             Indices = indices.ToArray(),
             Verts = new VertexPositionColorTexture[positions.Count],
             RigLocal = new Vector2[positions.Count],
@@ -384,8 +385,9 @@ public sealed class SpriteSkin : IDisposable
     // BasicEffect outputs texture × vertex colour, which can darken artwork but never
     // brighten it.
     public void Draw(Matrix cameraTransform, SkeletonPose pose, in Affine2 root, bool fill = true,
-                     float flash = 0f)
+                     float flash = 0f, IReadOnlyList<string> front = null)
     {
+        OrderLayers(front);
         if (pose.Count != _skeleton.Count)
             throw new ArgumentException("Pose rig doesn't match the binding's rig.");
 
@@ -411,7 +413,7 @@ public sealed class SpriteSkin : IDisposable
         _gd.RasterizerState   = RasterizerState.CullNone;
         _gd.SamplerStates[0]  = SamplerState.LinearClamp;
 
-        foreach (var layer in _layers)
+        foreach (var layer in _order)
         {
             _effect.Texture = layer.Texture;
             foreach (var pass in _effect.CurrentTechnique.Passes)
@@ -432,7 +434,7 @@ public sealed class SpriteSkin : IDisposable
         // eat the edges.
         _gd.BlendState = AdditivePremultiplied;
         _effect.DiffuseColor = new Vector3(MathHelper.Clamp(flash, 0f, 1f) * FlashGain);
-        foreach (var layer in _layers)
+        foreach (var layer in _order)
         {
             _effect.Texture = layer.Texture;
             foreach (var pass in _effect.CurrentTechnique.Passes)
@@ -444,6 +446,32 @@ public sealed class SpriteSkin : IDisposable
         }
         _effect.DiffuseColor = Vector3.One;
         _gd.BlendState       = BlendState.AlphaBlend;
+    }
+
+    // Back-to-front draw order for this frame: the bound order, except that a layer owning
+    // any bone in `front` (a clip's InFront window) moves to just above the torso layer —
+    // the one that owns "chest". Layers already above the torso, and single-layer skins,
+    // are left alone.
+    private readonly List<Layer> _order = new();
+    private void OrderLayers(IReadOnlyList<string> front)
+    {
+        _order.Clear();
+        _order.AddRange(_layers);
+        if (front == null || front.Count == 0 || _layers.Count < 2) return;
+        Layer torso = null;
+        foreach (var l in _layers)
+            if (l.Spec?.Bones is { Count: > 0 } && l.Spec.IncludesBone("chest")) { torso = l; break; }
+        if (torso == null) return;
+        foreach (var l in _layers)
+        {
+            if (l == torso || l.Spec?.Bones is not { Count: > 0 }) continue;
+            bool wanted = false;
+            foreach (var b in front) if (l.Spec.IncludesBone(b)) { wanted = true; break; }
+            int at = _order.IndexOf(l);
+            if (!wanted || at > _order.IndexOf(torso)) continue;
+            _order.RemoveAt(at);
+            _order.Insert(_order.IndexOf(torso) + 1, l);
+        }
     }
 
     // How hard a full-strength flash pushes. >1 so mid-tone artwork saturates to white

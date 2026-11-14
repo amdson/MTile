@@ -61,7 +61,6 @@ public static class FrameData
 
     // ── Terrain / charged moves. Here Startup is the minimum charge before it can
     //    fire and Active the longest it can run; Total is player-driven.
-    public static class BlockBurstAction { public const float Total = 15.6f / F,                             EndLag = 10.8f / F; }
     public static class LobbedAreaAction { public const float Startup = 24 / F,                             EndLag = 12    / F; }   // min charge to throw
     public static class BlockGrabAction  { public const float                    Active = 36 / F,           EndLag = 12    / F; }   // wait for a drag / tether
     // Startup: committed but holding nothing — the wind-up (6f since 2026-11-05, todo F:
@@ -236,7 +235,7 @@ public class NullAction : ActionState
 // Three ways in (CheckPreConditions):
 //   1. An attack's Exit stamped recovery frames — the normal handoff.
 //   2. LMB press-hold from a neutral state — the wind-up role, at index 0. The
-//      press FRAME itself is left to press-edge chords (BlockBurst, Grab,
+//      press FRAME itself is left to press-edge chords (Grab, BlockGrab,
 //      all of which outrank or consume the press); the wind-up picks up what
 //      they declined one frame later.
 //   3. Eviction lookahead: re-running the candidate preconditions under the
@@ -418,6 +417,13 @@ public class RecoveryAction : ActionState
         if (t <= ChargeRampSeconds + SweetSpotSeconds) return 1f;
         return SettleFraction;
     }
+
+    // The charge stance is the one thing this state draws: "Charge" on the ground, "ChargeAir"
+    // off it (clips typed "RecoveryAction.Charge…"; the animator swaps in "ChargeRun" while
+    // the body is moving — it owns velocity, ActionVars doesn't). Null otherwise, so the
+    // countdown and neutral still read as "no action". The clips loop on the charge clock.
+    public override string AnimationVariant(in ActionVars vars)
+        => !vars.Charging ? null : vars.IsGrounded ? "Charge" : "ChargeAir";
 
     // Inside the full-charge release window? Shared by the telegraph dot and the
     // render-side charge glow (AttackGlowSystem) so the flash and the curve can
@@ -2382,6 +2388,11 @@ public class GuardAction : ActionState
         Aim(ctx, ab, ref vars);
     }
 
+    // The shield arm follows the shield: the animator re-aims the authored (horizontal-forward)
+    // guard pose onto GuardDir, the way a stab follows its StabDir. Render-only.
+    public override bool TryAnimationAim(in ActionVars vars, out Vector2 dir)
+    { dir = vars.GuardDir; return dir.LengthSquared() > 1e-6f; }
+
     // Point the shield from the body toward the cursor and publish it to CombatState,
     // whose cone ResolveGuard tests — the arc drawn and the arc that blocks are the same
     // vector. The body turns to the shield's side, so it is never held behind the back;
@@ -2401,10 +2412,12 @@ public class GuardAction : ActionState
     // the cursor is, ~14px tall — the size of the buckler art it stands in for. Its arc
     // stays inside the guarded cone (CombatState.GuardConeHalfAngle) around GuardDir, so
     // it still says "covered here".
-    private const float ShieldRadius    = PlayerCharacter.Radius * 0.9f;
+    // Radius and lift put the arc on the circle the shield hand sweeps about the shoulder
+    // (the guard clip aims shoulder → hand along GuardDir), so the hand sits on the shield.
+    private const float ShieldRadius    = PlayerCharacter.Radius * 1.05f;
     private const float ShieldHalfAngle = 0.7f;   // radians; chord ≈ 2·r·sin(0.7) ≈ 14px
     private const float ShieldThickness = 4f;
-    private const float ShieldLift      = 2f;     // a touch above centre
+    private const float ShieldLift      = -4f;    // shoulder height: a touch BELOW the body centre
     private static readonly Color ShieldColor = new(205, 127, 50);   // bronze
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
@@ -2987,8 +3000,6 @@ public class BlockPaintAction : ActionState
     // off a live build front extends it as far as the stroke goes — the meter is the
     // limit. Someone else's sprout (an enemy's build, a rival's avalanche ghosts strung
     // across the map) only extends reach by ChainReachMul, as before. See InBuildReach.
-    // Internal because BlockBurstAction needs the same reach to decide whether a held
-    // RMB is actually placing at the cursor — one constant so the two can't disagree.
     internal const float BuildReach    = 64f;
     internal const float ChainReachMul = 2f;
     // Minimum ball speed at RELEASE for the stroke to upgrade into an eruption. Measured
@@ -3281,137 +3292,9 @@ public class BlockPlaceAction : ActionState
     }
 }
 
-// ---------- Block Burst — LMB while holding RMB over dead air -------------------
-
-// The block-side twin of BurstAction: where that one is LMB-hold → RMB-click and shoves
-// terrain away, this is RMB-hold → LMB-click and conjures terrain out of nothing — a
-// plus-shaped puff of foam (cursor cell + its 4 neighbours) in open air. Foam is the
-// right material for it: half of dirt's HP and it decays on its own, so a free
-// mid-air platform is scaffolding rather than permanent level editing.
-//
-// Two things guard against stealing a press that RMB was already spending:
-//   • Precondition — declines whenever the cursor cell is one the drag-build could
-//     actually paint (in reach, free, touching support). That is exactly ChunkMap's
-//     placement rule, so "not placing a block" is decided by the same predicate
-//     BlockReadyAction paints with rather than by a guess.
-//   • Phase gate — the RMB gesture must currently be BlockPaintAction (plain painting).
-//     A Shift+RMB charge, an armed flag, or a running eruption all decline the click.
-//     That covers the case the predicate can't see: cursor over air, nothing placeable
-//     there, but RMB is mid-eruption.
-//
-// Priority can NOT do that job here: the wind-up (RecoveryAction's charge role, Passive
-// 45) contests the press one frame later, and the FSM scan takes the single highest-
-// Passive candidate — the press FRAME itself is what this action must win, which its
-// 30/30 does only because the wind-up deliberately sits the press frame out. Hence the
-// explicit gates above rather than a priority arms race.
-public class BlockBurstAction : ActionState
-{
-    private const float Duration      = FrameData.BlockBurstAction.Total;
-    // Where the foam appears. Beyond BlockReadyAction.BuildReach on purpose — this is
-    // the ranged option, so it stays useful past where drag-building gives out.
-    // Px, deliberately independent of tile size: calibrated against the player and
-    // combat spacing, not the grid.
-    private const float BurstReach    = 128f;
-    private const float RecoverySeconds = FrameData.BlockBurstAction.EndLag;
-    // Mass dropped on the (force-sprouted) center cell. Denominated in tile-equivalents,
-    // so it rescales with the grid: 4 tiles at the old 16px grid = 8.5 at the 11px grid;
-    // same physical volume. At the old grid that was exactly one unit per neighbour once
-    // the center forwards them, i.e. the plus. See Enter.
-    private const float MassInjection = 8.5f * TileMassField.Threshold;
-
-    public override int ActivePriority  => 30;
-    public override int PassivePriority => 30;
-
-    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-    {
-        // The RMB gesture must be plain painting — anything else owns the button, so
-        // keep hands off. (The eruption is a release-time upgrade of the paint stroke
-        // now, so "painting" covers a charged stroke too; that's fine, the burst needs
-        // LMB while the eruption is decided by how RMB comes up.)
-        if (ctx.PreviousAction(0) is not BlockPaintAction) return false;
-        // Spike mode's hold is spiking or a crystal-wave charge, never a foam puff.
-        if (ctx.SpikesSelected) return false;
-        // RMB held (not the press-edge — that frame belongs to BlockReady) + LMB press-edge.
-        if (!ctx.Input.RightClick || !ctx.Input.LeftClick) return false;
-        if (ctx.Controller == null || ctx.Controller.GetPrevious(1).LeftClick) return false;
-        if (ctx.Combat?.BlocksAttack == true) return false;
-        if (ctx.Combat?.HitstunActive == true) return false;
-        if (ab.Condition.RecoveryActive) return false;
-
-        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
-        var center = BlockEruptionHelpers.CellCenter(gtx, gty);
-        float distSq = Vector2.DistanceSquared(ctx.Body.Position, center);
-        if (distSq > BurstReach * BurstReach) return false;
-        // Empty air only — a cursor in solid is the eruption gesture's territory.
-        if (!ctx.Chunks.GetCellState(gtx, gty).IsOpen()) return false;
-        // If the drag-build could paint here, RMB is placing: leave the press alone.
-        if (BlockPaintAction.InBuildReach(ctx, gtx, gty, center) &&
-            ctx.Chunks.CanRequestTile(gtx, gty)) return false;
-        return true;
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => vars.TimeInState < Duration;
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.TimeInState = 0f;
-        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
-        vars.OriginCell = BlockEruptionHelpers.CellCenter(gtx, gty);
-
-        // The center goes in unsupported — ForceSprout is the only path that conjures
-        // matter with nothing to build from, which is the whole point of this move. The
-        // arms are then left to the mass cascade: injecting MassInjection units at the
-        // (now occupied) center makes it forward one unit at a time to each neighbour,
-        // and those commit off the center once they have a full unit. So the plus isn't
-        // hardcoded — it's the shape four units of mass takes when it flows out of a
-        // filled cell. Raise MassInjection and it grows a fatter blob for free.
-        byte owner = BlockOwnership.OwnerFor(ctx.Faction);
-        ctx.Chunks.ForceSprout(gtx, gty, TileType.Foam, owner);
-        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, MassInjection, TileType.Foam, owner: owner);
-
-        // Spend the click so releasing LMB afterwards can't also buy a slash.
-        ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
-        ctx.Intents.Consume(IntentType.Click, ctx.CurrentFrame);
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => vars.TimeInState += ctx.Dt;
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        ab.Condition.StampRecoveryForSeconds(RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
-    }
-
-    // Light planted stance — a flick of the wrist, not a commitment.
-    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
-    {
-        m.MaxWalkSpeed *= 0.6f;
-        m.WalkAccel    *= 0.7f;
-        m.MaxAirSpeed  *= 0.7f;
-    }
-
-    // A plus of expanding foam-white brackets over the target cells — the placement is
-    // already visible as sprouting tiles, so this just marks the shape that was chosen.
-    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
-    {
-        float u = MathHelper.Clamp(vars.TimeInState / Duration, 0f, 1f);
-        var color = Color.Lerp(new Color(235, 245, 255), Color.Transparent, u);
-        float half = Chunk.TileSize * 0.5f * (0.4f + 0.6f * u);
-        Span<Vector2> cells = stackalloc Vector2[5]
-        {
-            vars.OriginCell,
-            vars.OriginCell + new Vector2(0f, -Chunk.TileSize),
-            vars.OriginCell + new Vector2(Chunk.TileSize, 0f),
-            vars.OriginCell + new Vector2(0f, Chunk.TileSize),
-            vars.OriginCell + new Vector2(-Chunk.TileSize, 0f),
-        };
-        foreach (var c in cells)
-            t.Rect(c, half * 2f, color);
-    }
-}
+// (BlockBurstAction — LMB while RMB painted over dead air conjured a plus of foam out of
+// nothing — was removed 2026-11-13: a free mid-air platform on demand made air travel
+// unlimited. ChunkMap.ForceSprout, its unsupported-sprout path, stays for the enemy builders.)
 
 // ---------- Block Eruption — the primed window between flick and release ---------
 
@@ -3780,6 +3663,10 @@ public class BlockGrabAction : ActionState
     // so decline and let the overlay clip play at its authored rate.
     public override float AnimationProgress(in ActionVars vars) => -1f;
 
+    // The hauling arm points at the cursor, where the tether leads. Render-only.
+    public override bool TryAnimationAim(in ActionVars vars, out Vector2 dir)
+    { dir = vars.GrabDir; return dir.LengthSquared() > 1e-6f; }
+
     // Debug: GrabReach, the radius PressIsBlockGrab tests the cursor against.
     public override void DebugQueryShapes(TelegraphList t, PhysicsBody body, in ActionVars vars)
         => t.Ring(body.Position, GrabReach, Color.Magenta * 0.6f, segments: 32);
@@ -4113,6 +4000,11 @@ public class GrabAction : ActionState
 
     public override string AnimationVariant(in ActionVars vars)
         => vars.GrabVictim.IsNone ? null : "Hold";
+
+    // Once a victim is held the arms follow it: it is carried toward the cursor, so the
+    // cursor direction is where it hangs. The windup reaches straight ahead (no aim).
+    public override bool TryAnimationAim(in ActionVars vars, out Vector2 dir)
+    { dir = vars.GrabDir; return !vars.GrabVictim.IsNone && dir.LengthSquared() > 1e-6f; }
 
     // 48/48 — above BlockGrabAction (46/46), which shares the Shift+LMB press. They
     // never actually compete on priority: both gate on BlockGrabAction.PressIsBlockGrab

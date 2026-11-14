@@ -21,7 +21,7 @@ peer's world would desync the match.
 | LMB while guard-charged | Guard retaliate (fast counter) |
 | RMB | Block paint |
 | Shift + RMB | Block place (build) |
-| RMB + LMB combos | Bursts (`BurstAction`, `BlockBurstAction`) |
+| LMB hold + RMB | Burst (`BurstAction`) |
 | 1–4 | Build material: Stone / Dirt / Sand / Foam |
 
 The gesture details (hold thresholds, circle tolerance) live in

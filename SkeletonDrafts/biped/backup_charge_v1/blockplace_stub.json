@@ -1,10 +1,24 @@
 {
-  "Name": "airspinstab",
-  "Type": "AirWhipKick",
-  "Skeleton": "biped_rabbit",
-  "Duration": 0.6,
-  "Loop": false,
+  "Name": "blockplace",
+  "Type": "BlockPlaceAction",
+  "Skeleton": "biped",
+  "Duration": 2,
+  "Loop": true,
   "Region": "UpperBody",
+  "OffRegionWeight": 0.3,
+  "Scene": {
+    "Guides": [
+      {
+        "Id": "g1",
+        "Kind": "Ground",
+        "X": 0,
+        "Y": 40,
+        "W": 0,
+        "H": 0,
+        "Label": "floor"
+      }
+    ]
+  },
   "Keyframes": [
     {
       "Time": 0,
@@ -22,16 +36,8 @@
           "Rotation": 0
         },
         {
-          "Bone": "shoulder_l",
-          "Rotation": -1.57
-        },
-        {
-          "Bone": "shoulder_r",
-          "Rotation": 1.57
-        },
-        {
           "Bone": "arm_l_upper",
-          "Rotation": -1.5715926
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_l_lower",
@@ -39,31 +45,19 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.5715927
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_r_lower",
           "Rotation": 0
         },
         {
-          "Bone": "hip_l",
-          "Rotation": -3.14159
-        },
-        {
-          "Bone": "hip_r",
-          "Rotation": 0
-        },
-        {
           "Bone": "leg_l_upper",
-          "Rotation": -1.5707989
+          "Rotation": 1.5707964
         },
         {
           "Bone": "leg_l_lower",
           "Rotation": 0
-        },
-        {
-          "Bone": "foot_l",
-          "Rotation": -1.3258177
         },
         {
           "Bone": "leg_r_upper",
@@ -72,10 +66,6 @@
         {
           "Bone": "leg_r_lower",
           "Rotation": 0
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258177
         }
       ],
       "Additions": [
@@ -83,24 +73,11 @@
           "Name": "com",
           "Kind": "Point",
           "Px": 0,
-          "Py": -20.940285,
+          "Py": -21,
           "Dx": 0,
           "Dy": 0
         }
       ]
     }
-  ],
-  "Scene": {
-    "Guides": [
-      {
-        "Id": "g1",
-        "Kind": "Ground",
-        "X": 0.0,
-        "Y": 40.0,
-        "W": 0.0,
-        "H": 0.0,
-        "Label": "floor"
-      }
-    ]
-  }
+  ]
 }

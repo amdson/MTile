@@ -5,6 +5,13 @@
   "Duration": 0.48,
   "Loop": false,
   "FlipAt": 0.1,
+  "InFront": [
+    {
+      "Bone": "leg_r_upper",
+      "Start": 0.12,
+      "End": 0.64
+    }
+  ],
   "Keyframes": [
     {
       "Time": 0,

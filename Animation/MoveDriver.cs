@@ -80,6 +80,8 @@ public sealed class FrameInputs
     public void Clear() { Overlays.Clear(); Pins.Clear(); Constraints.Clear(); }
 }
 
+public enum RunEntry : byte { None, Start, Turn }
+
 // What the animator core remembers about the frames BEFORE this one, handed to every driver
 // alongside the current sample. Some clip policy keys on an EDGE or a duration rather than on
 // a single frame — a touchdown, a stop — and the sample, which is a pure snapshot of now,
@@ -98,18 +100,68 @@ public struct AnimHistory
     // Seconds the body has been continuously grounded — 0 on the touchdown frame itself and
     // throughout flight, so `GroundedTime < w` IS "touched down within the last w seconds".
     public float                GroundedTime;
+    // Downward speed (px/s) on the last airborne frame before the most recent touchdown —
+    // how hard that landing was. Kept until the next touchdown overwrites it.
+    public float                LandSpeed;
+    // Seconds of the current grounded RUN stretch (run speed along the facing; 0 when not in
+    // one), and how that stretch began: from a standstill, or out of a reversal of facing.
+    public float                RunTime;
+    public RunEntry             RunEntry;
+    // Seconds the body has been continuously grounded in the idle band, and the ground speed
+    // it had just before it stopped (a short decaying peak — the body brakes within a frame).
+    public float                StillTime;
+    public float                StopSpeed;
 
     // A character first observed already standing has been there forever as far as the
     // animator knows: seeding large is what keeps a grounded spawn from playing a landing.
     private const float Settled = 1e9f;
+    // A heavy touchdown overshoots the float spring and the FSM reads "airborne" for a frame
+    // or two on the rebound. That is one landing, not two: an airborne stretch shorter than
+    // this is bridged — GroundedTime carries on across it and LandSpeed keeps the real impact.
+    private const float BlipSeconds = 0.06f;
+    private float _airTime;          // seconds of the current / last airborne stretch
+    private float _groundedAtLeave;  // GroundedTime when that stretch began
+    private float _sinceRun;             // seconds since the last frame of a grounded run stretch (seeded Settled)
+    private int   _lastRunFacing;
+    private float _speedPeak;            // |vx| peak, decaying at PeakDecay px/s²
+    private const float PeakDecay    = 300f;
+    private const float TurnGap      = 0.15f;   // a new run stretch this soon after the last, facing flipped = a turn
 
     // Called at the top of Update, BEFORE any driver runs, so a driver reads this frame's
     // measurements against last frame's retained sample.
     public void BeginFrame(in CharacterAnimSample s, float dt)
     {
-        if (!HasPrev)         GroundedTime = s.Grounded ? Settled : 0f;
-        else if (!s.Grounded) GroundedTime = 0f;
-        else                  GroundedTime = Prev.Grounded ? GroundedTime + dt : 0f;
+        if (!HasPrev) { GroundedTime = s.Grounded ? Settled : 0f; StillTime = Settled; _sinceRun = Settled; return; }
+        MeasureGroundSpeed(in s, dt);
+        if (!s.Grounded)
+        {
+            if (Prev.Grounded) { _groundedAtLeave = GroundedTime; _airTime = 0f; }
+            _airTime += dt;
+            GroundedTime = 0f;
+        }
+        else if (Prev.Grounded) GroundedTime += dt;
+        else if (_airTime < BlipSeconds) GroundedTime = _groundedAtLeave + _airTime + dt;   // a rebound blip: same landing
+        else { GroundedTime = 0f; LandSpeed = Prev.Velocity.Y; }                            // a real touchdown
+    }
+
+    private void MeasureGroundSpeed(in CharacterAnimSample s, float dt)
+    {
+        float speed = MathF.Abs(s.Velocity.X);
+        bool running = s.Grounded && GroundLocomotionDriver.IsRunning(in s);
+        if (running)
+        {
+            if (RunTime <= 0f)   // a stretch begins: classify how
+                RunEntry = _sinceRun < TurnGap && _lastRunFacing != s.Facing ? RunEntry.Turn
+                         : _sinceRun >= TurnGap && Prev.Grounded ? RunEntry.Start
+                         : RunEntry.None;
+            RunTime += dt; _sinceRun = 0f; _lastRunFacing = s.Facing;
+        }
+        else { RunTime = 0f; _sinceRun += dt; }
+
+        bool still = s.Grounded && speed <= GroundLocomotionDriver.WalkSpeedThreshold;
+        if (!still) StillTime = 0f;
+        else { if (StillTime <= 0f) StopSpeed = _speedPeak; StillTime += dt; }
+        _speedPeak = MathF.Max(s.Grounded ? speed : 0f, _speedPeak - PeakDecay * dt);
     }
 
     // Called at the very bottom of Update — Prev stays last frame's for the whole body.
@@ -121,8 +173,8 @@ public interface IMoveDriver
     bool       Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h);
     ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h);
     // `t` is the clip's current normalized sample time (pre-advance) for drivers that need it.
-    // No history here yet — nothing contributes off the past; widen it the day something does.
-    void       Contribute(in CharacterAnimSample s, float t, FrameInputs dst);
+    // History is here for contributions keyed on an edge (the run-landing dip after a touchdown).
+    void       Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst);
 }
 
 // ─── The default registry ───────────────────────────────────────────────────────────────
@@ -159,8 +211,9 @@ public static class MoveDrivers
             new LaunchClipDriver(AnimTag.Dash,      AnimClip.Dash,       LaunchClipDriver.DashWindow),
             new SkidDriver(),
             new LandingDriver(),
+            new RunStopDriver(),
             new AirborneDriver(),
-            new GroundLocomotionDriver(),
+            new GroundLocomotionDriver(actionClips),
         };
 }
 
@@ -174,7 +227,7 @@ public sealed class TagClipDriver : IMoveDriver
         => s.Tag == _tag;
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => new(_clip, _time);
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst) { }
 }
 
 // Grounded locomotion — the terminal catch-all. Owns the speed/facing fan-out over the
@@ -182,6 +235,33 @@ public sealed class TagClipDriver : IMoveDriver
 // touchdown is LandingDriver's, which sits above this one and matches the same idle band.
 public sealed class GroundLocomotionDriver : IMoveDriver
 {
+    // Touching down INTO a walk or run keeps the leg cycle (LandingDriver stays out of it), so
+    // the impact is carried by the upper body alone: the LandRun overlay — torso pitching
+    // forward, arms swinging down, then back up into the stride — over the first RunLandWindow
+    // seconds. Only after a real drop (RunLandSpeed): the float spring and slope lips leave the
+    // ground for a frame or two all the time, and those must not dip.
+    private const string LandRunClipName = "LandRun";
+    public const float RunLandWindow = 0.25f;   // keep == land_run.json Duration
+    public const float RunLandSpeed  = 120f;    // px/s touchdown speed that earns the dip
+    private readonly AnimationDocument _landRun;   // null if the clip isn't authored on this rig
+
+    // The body reaches run speed in a frame and reverses in two or three, so a start or a turn
+    // has no deceleration to show and the legs are cycling from the first frame. Both are told
+    // by the upper body over the opening RunBurstWindow of the run stretch (AnimHistory.RunTime
+    // / RunEntry): RunStart drops the torso into a sprint drive from standing; RunPivot throws
+    // it back against the old momentum, then whips it forward into the new direction.
+    private const string RunStartClipName = "RunStart", RunPivotClipName = "RunPivot";
+    public const float RunBurstWindow = 0.25f;   // keep == run_start.json / run_pivot.json Duration
+    private readonly AnimationDocument _runStart, _runPivot;
+
+    public GroundLocomotionDriver(IReadOnlyDictionary<string, AnimationDocument> actionClips = null)
+    {
+        if (actionClips == null) return;
+        actionClips.TryGetValue(LandRunClipName, out _landRun);
+        actionClips.TryGetValue(RunStartClipName, out _runStart);
+        actionClips.TryGetValue(RunPivotClipName, out _runPivot);
+    }
+
     public const float WalkSpeedThreshold = 12f;   // px/s before Idle -> Walk
     public const float RunSpeedThreshold  = 40f;   // px/s before Walk -> Run (MaxWalkSpeed is 100)
     // Physical float above rest height (sample.GroundGap, px) beyond which a "grounded"
@@ -237,8 +317,18 @@ public sealed class GroundLocomotionDriver : IMoveDriver
     // effective config (FrameInputs.Solver) — gone the frame the roof clears. Only the Run
     // clip (not Walk/Idle) and only while physically supported (a pre-contact Hold frame has
     // no cadence to fix). See AnimSolverConfig.LowCeilingRunComWeightY.
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst)
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst)
     {
+        if (_landRun != null && s.Grounded && h.GroundedTime < RunLandWindow && h.LandSpeed >= RunLandSpeed
+            && MathF.Abs(s.Velocity.X) > WalkSpeedThreshold)
+            dst.Overlays.Add(new OverlayRequest(LandRunClipName, _landRun, h.GroundedTime / RunLandWindow));
+        else if (h.RunTime > 0f && h.RunTime < RunBurstWindow && s.Grounded)
+        {
+            if (h.RunEntry == RunEntry.Start && _runStart != null)
+                dst.Overlays.Add(new OverlayRequest(RunStartClipName, _runStart, h.RunTime / RunBurstWindow));
+            else if (h.RunEntry == RunEntry.Turn && _runPivot != null)
+                dst.Overlays.Add(new OverlayRequest(RunPivotClipName, _runPivot, h.RunTime / RunBurstWindow));
+        }
         if (s.LowCeiling && s.GroundGap <= PreContactGap && IsRunning(in s))
             dst.Solver.ComWeightY = dst.Solver.LowCeilingRunComWeightY;
     }
@@ -280,7 +370,7 @@ public sealed class SkidDriver : IMoveDriver
         => s.Tag != AnimTag.Crouch && SkidMotion.IsSkidding(in s, in st, crouched: false);
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => new(AnimClip.Skid, ClipTimeMode.Clock);
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst) { }
 }
 
 // The touchdown one-shot: a landing that settles into the IDLE BAND plays the authored Land
@@ -294,19 +384,56 @@ public sealed class SkidDriver : IMoveDriver
 // grounded edge and consumed by overriding the chosen clip — until 2026-09-20.
 public sealed class LandingDriver : IMoveDriver
 {
-    // Seconds the one-shot owns the idle band after touchdown. Keep == land.json Duration:
-    // the clip is Clock-timed and holds its last pose, so a longer window freezes on the
+    // Seconds the one-shot owns the idle band after touchdown. Keep == the clip's Duration:
+    // the clips are Clock-timed and hold their last pose, so a longer window freezes on the
     // final frame rather than playing more animation.
-    public const float LandWindow = 0.25f;
+    public const float LandWindow     = 0.30f;   // land.json
+    public const float HardLandWindow = 0.50f;   // land_hard.json
+    // Touchdown speed (px/s) from which the heavy landing plays: a fall of ~75 px at world
+    // gravity. A full-height jump back onto the level it left lands well under this.
+    public const float HardLandSpeed  = 300f;
+
+    private static float WindowOf(AnimClip c) => c == AnimClip.LandHard ? HardLandWindow : LandWindow;
+
+    // A landing clip already playing keeps the band for its window while the body stays at
+    // standing height — including the frame or two the FSM calls airborne on the float spring's
+    // rebound (AnimHistory bridges the same blip). A real jump leaves standing height at once.
+    private static bool Holding(in CharacterAnimSample s, in CharacterAnimState st)
+        => st.Clip is AnimClip.Land or AnimClip.LandHard && st.ClipTime < WindowOf(st.Clip)
+           && (s.Grounded || (s.GroundGap <= GroundLocomotionDriver.PreContactGap && s.Velocity.Y > -AirborneDriver.ApexSpeed));
 
     public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
-        => s.Grounded && h.GroundedTime < LandWindow
-           && MathF.Abs(s.Velocity.X) <= GroundLocomotionDriver.WalkSpeedThreshold;
+    {
+        if (MathF.Abs(s.Velocity.X) > GroundLocomotionDriver.WalkSpeedThreshold) return false;
+        if (Holding(in s, in st)) return true;
+        return s.Grounded && h.GroundedTime < (h.LandSpeed >= HardLandSpeed ? HardLandWindow : LandWindow);
+    }
 
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
-        => new(AnimClip.Land, ClipTimeMode.Clock);
+        => new(Holding(in s, in st) ? st.Clip : h.LandSpeed >= HardLandSpeed ? AnimClip.LandHard : AnimClip.Land,
+               ClipTimeMode.Clock);
 
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst) { }
+}
+
+// The stop one-shot: a body that was running a moment ago and is now standing in the idle band
+// plays the authored RunStop — braced, the torso carried forward over the front knee, rocking
+// back upright — instead of cutting to Idle. The body itself stops within a frame or two, so
+// this is the only place the momentum can be shown. Sits below LandingDriver: a touchdown is a
+// landing, not a stop.
+public sealed class RunStopDriver : IMoveDriver
+{
+    public const float StopWindow = 0.30f;   // keep == run_stop.json Duration
+
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => s.Grounded && s.Tag == AnimTag.None
+           && MathF.Abs(s.Velocity.X) <= GroundLocomotionDriver.WalkSpeedThreshold
+           && h.StillTime < StopWindow && h.StopSpeed > GroundLocomotionDriver.RunSpeedThreshold;
+
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => new(AnimClip.RunStop, ClipTimeMode.Clock);
+
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst) { }
 }
 
 // An airborne launch whose state is shorter than its clip. DoubleJumpingState and
@@ -335,17 +462,47 @@ public sealed class LaunchClipDriver : IMoveDriver
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => new(_clip, ClipTimeMode.Clock);
 
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst) { }
 }
 
-// Generic airborne (no tag): rising plays Jump, falling plays Fall.
+// Generic airborne (no tag): rising plays Jump, falling plays Fall, and the slow top of a rise
+// plays the Apex float between them. Apex is ENTERED only while still rising (slower than
+// ApexSpeed) and then held until the body is falling faster than ApexSpeed — so walking off a
+// ledge (never rising) goes straight to Fall, and the float cannot flicker back to Jump.
 public sealed class AirborneDriver : IMoveDriver
 {
+    // px/s. At world gravity (600 px/s²) the band is 2·75/600 = 0.25 s — keep ≈ apex.json Duration:
+    // the clip is Clock-timed and holds its last pose.
+    public const float ApexSpeed = 75f;
+    // Seconds the Leap owns a running jump from the top of its rise. Keep == leap.json Duration.
+    public const float LeapWindow = 0.65f;
+    // Seconds of the Jump clip a running jump plays before the Leap takes over: the crouch and
+    // the leg extension (jump.json's keys up to 0.10-0.15 s), not the long straight-legged rise.
+    public const float LeapAfterTakeoff = 0.12f;
+
     public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => !s.Grounded;
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
-        => new(s.Velocity.Y < 0f ? AnimClip.Jump : AnimClip.Fall, ClipTimeMode.Clock);
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+    {
+        float vy = s.Velocity.Y;
+        // A RUNNING jump has no float: where a standing jump tucks into Apex, it opens straight
+        // out of the take-off into the Leap — a stride split sailing forward — and holds it for
+        // LeapWindow before settling into the generic Fall. Going Jump → Leap directly is the
+        // point: through Apex the legs tucked and then split and the arms swapped sides, two
+        // moves where the eye wants one. It takes over as soon as the Jump's push-off has played
+        // (LeapAfterTakeoff) and opens gradually through the rest of the rise, so the split is
+        // never a snap; out of any other launch it enters like Apex (still rising, slower than
+        // ApexSpeed). Only at run speed along the facing; dropping the speed or turning round
+        // hands back to Apex / Fall.
+        if (GroundLocomotionDriver.IsRunning(in s)
+            && (st.Clip == AnimClip.Leap ? st.ClipTime < LeapWindow
+                : st.Clip == AnimClip.Jump ? vy < 0f && st.ClipTime >= LeapAfterTakeoff
+                : vy < 0f && vy > -ApexSpeed && st.Clip != AnimClip.Apex))
+            return new(AnimClip.Leap, ClipTimeMode.Clock);
+        bool apex = vy < 0f ? vy > -ApexSpeed : st.Clip == AnimClip.Apex && vy < ApexSpeed;
+        return new(apex ? AnimClip.Apex : vy < 0f ? AnimClip.Jump : AnimClip.Fall, ClipTimeMode.Clock);
+    }
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst) { }
 }
 
 // Crouching: a knockback shove plays CrouchSkid (SkidMotion). Otherwise CrouchWalk is the one
@@ -367,7 +524,7 @@ public sealed class CrouchDriver : IMoveDriver
             return new ClipChoice(AnimClip.DuckUnder, ClipTimeMode.Clock);
         return new ClipChoice(AnimClip.CrouchWalk, ClipTimeMode.CadencePhase);
     }
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst) { }
 }
 
 // The parkour vault: base clip is Parkour (clock-driven), plus two contributions synchronized
@@ -409,7 +566,7 @@ public sealed class ParkourDriver : IMoveDriver
             _               => AnimClip.Parkour,
         }, ClipTimeMode.Clock);
 
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst)
+    public void Contribute(in CharacterAnimSample s, float t, in AnimHistory h, FrameInputs dst)
     {
         if (s.Tag != AnimTag.ArcJump) return;   // 1-tile climbs: legs only (see Matches)
         if (_hands != null)

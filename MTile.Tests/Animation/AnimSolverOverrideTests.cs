@@ -62,7 +62,7 @@ public class AnimSolverOverrideTests
         {
             var dst = new FrameInputs();
             dst.Solver.CopyFrom(cur);
-            drv.Contribute(Sample(new Vector2(vx, 0f), facing, roof, gap), 0f, dst);
+            drv.Contribute(Sample(new Vector2(vx, 0f), facing, roof, gap), 0f, default, dst);
             Assert.Equal(cur.ComWeightX, dst.Solver.ComWeightX);   // only Y is touched
             Assert.Equal(cur.TierContact, dst.Solver.TierContact);
             return dst.Solver.ComWeightY;

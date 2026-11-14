@@ -47,6 +47,15 @@ public sealed class AnimationKeyframe
 // (WhenWritingDefault) so legacy files stay textually stable.
 public enum AnimRegion { FullBody, UpperBody, LowerBody }
 
+// One AnimationDocument.InFront window: `Bone` names any bone of the limb (its skin layer
+// is found by that bone), [Start, End] is in normalized clip time.
+public sealed class ClipFront
+{
+    public string Bone  { get; set; }
+    public float  Start { get; set; }
+    public float  End   { get; set; } = 1f;
+}
+
 // A named animation: a Type-tagged time series of keyframes, serialized as one JSON
 // file. Sampling between keyframes (in the editor / a future runtime player) lerps
 // the per-bone transforms. This is the unit a sidebar entry represents.
@@ -98,6 +107,28 @@ public sealed class AnimationDocument
     // save) = no turn. Action overlays only.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public float?                  FlipAt { get; set; }
+    // Draw-order overrides for layered sprite skins: while the clip is inside a window, the
+    // skin layer that owns the named bone draws IN FRONT of the torso layer instead of at
+    // its bound depth. A stick figure has no depth, so a side kick reads as one long line;
+    // on a skin the torso art (tabard, robe) covers the thigh and the kick vanishes unless
+    // the leg comes forward. Render-only; ignored by rigs without a layered skin. Null
+    // (default, omitted on save) = bound order throughout. Action overlays only.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ClipFront>         InFront { get; set; }
+    // An AIMED overlay (the action reports ActionState.TryAnimationAim) re-aims the vector
+    // between two bone tips onto the input direction. Default (both null, omitted on save) is
+    // the two hands, far → near — a stab's whole arm pair turns. A clip names its own pair when
+    // only part of the pose should follow: Guard aims shoulder → shield hand ("chest" →
+    // "arm_l_lower"), so the shield arm tracks the cursor and the weapon arm stays put. The
+    // vector must be authored pointing horizontally forward at the moment that matters.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string                  AimFrom { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string                  AimTo { get; set; }
+    // Optional second tip aimed from the same AimFrom — a two-armed hold (Grab's Hold aims
+    // both hands at the carried victim).
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string                  AimTo2 { get; set; }
     // EXPLICIT motion intent (ClipMotion): Track when the clip authors its own body_path,
     // InPlace for a deliberately stationary clip. Null (legacy) resolves to whichever the
     // clip's data implies — a track if one is authored, else stationary.

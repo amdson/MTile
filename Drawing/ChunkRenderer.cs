@@ -14,6 +14,7 @@ public sealed class ChunkRenderer
     private readonly Texture2D      _pixel;
     private readonly Camera         _camera;
     private readonly GraphicsDevice _graphicsDevice;
+    private readonly BackWallRenderer _backWall;
     // Optional grain atlas for tile fills; null → flat palette fills.
     public TileTextureAtlas Atlas;
     // Launched-avalanche fill zone to shade (Game1 sets it; null → none).
@@ -37,6 +38,7 @@ public sealed class ChunkRenderer
         _pixel          = pixel;
         _camera         = camera;
         _graphicsDevice = graphicsDevice;
+        _backWall       = new BackWallRenderer(spriteBatch, pixel);
     }
 
     // The full world-geometry pass: tiles, platforms, then sprouts (live + pending).
@@ -45,8 +47,17 @@ public sealed class ChunkRenderer
     {
         var chunks = sim.Chunks;
 
+        UpdateLightField(chunks);
+        // Behind the tiles: dark earth in underground / unlit open cells.
+        _backWall.Atlas = Atlas;
+        _backWall.Draw(chunks, _light, _visMinX, _visMinY, _visMaxX, _visMaxY);
+
         foreach (var chunk in chunks)
             DrawChunk(chunk, chunks);
+
+        // Grass caps over the finished tiles (render-only growth; see GrassField).
+        _grass.Update(chunks, time);
+        _grass.Draw(_spriteBatch, _pixel, chunks, _visMinX, _visMinY, _visMaxX, _visMaxY);
 
         DrawOwnership(chunks);
         DrawSpikes(chunks);
@@ -446,65 +457,187 @@ public sealed class ChunkRenderer
         }
     }
 
-    private void DrawChunk(Chunk chunk, ChunkMap chunks)
+    // ---- Tile depth look (todo V2/V3/V4) --------------------------------------------
+    // Three cues that turn a uniform grid into one lit body of rock: the outline is
+    // strong only where rock meets air (silhouette) and a faint darker shade of the
+    // material between neighbours; fills are tinted by the sky light that reaches them
+    // (TerrainLightField); and exposed tops/undersides carry a light/dark band.
+
+    // Interior grid line: the tile's own fill colour pulled this far toward black.
+    private const float InteriorLineDarkness = 0.28f;
+    // Silhouette line (solid against non-solid): palette colour pulled this far toward
+    // black. 1 = pure black, the old gutter colour.
+    private const float SilhouetteDarkness = 0.88f;
+    // Silhouette line thickness, px. Left/top lines are cut out of the fill, so this
+    // also shrinks an exposed tile's fill on those sides.
+    private const int SilhouettePx = TileGutter;
+    // Thickness, px, of the highlight band under an exposed top and the shadow band
+    // over an exposed underside (2px at TileSize 11).
+    private const int CapBandPx = (Chunk.TileSize + 4) / 6;
+    // Top band: fill colour pulled this far toward CapLight.
+    private const float CapHighlight = 0.32f;
+    // Underside band: fill colour pulled this far toward black.
+    private const float CapShadow = 0.40f;
+    // Optional side-face treatment: a 1-gutter-wide strip inside an exposed left/right
+    // face, pulled this far toward black. 0 = off.
+    private const float SideFaceShadow = 0f;
+    // How dark a fully damaged tile's fill gets (unchanged from the flat look).
+    private const float DamageDarkness = 0.7f;
+    // What the top band lerps toward — warm rather than pure white, so it reads as light
+    // falling on the material and not as the charged-tile white.
+    private static readonly Color CapLight = new(255, 242, 214);
+
+    private const int EdgeLeft = 1, EdgeTop = 2, EdgeRight = 4, EdgeBottom = 8, TileCharged = 16;
+
+    private readonly TerrainLightField _light = new();
+    private readonly GrassField _grass = new();
+    // Visible cell window, set by UpdateLightField; tile loops are clipped to it.
+    private int _visMinX, _visMinY, _visMaxX, _visMaxY;
+    // Per-chunk scratch shared by the two passes, so the fill colour and neighbour
+    // tests are computed once per tile and nothing is allocated per frame.
+    private readonly Color[] _tileColor = new Color[Chunk.Size * Chunk.Size];
+    private readonly byte[]  _tileFlags = new byte[Chunk.Size * Chunk.Size];
+
+    // Once per Draw: the light field for exactly the cells this frame can show.
+    private void UpdateLightField(ChunkMap chunks)
     {
         var viewport = _graphicsDevice.Viewport;
         float halfW = viewport.Width / (2f * _camera.Zoom);
         float halfH = viewport.Height / (2f * _camera.Zoom);
-        int chunkPixelSize = Chunk.Size * Chunk.TileSize;
-        var origin = chunk.WorldPosition;
+        _visMinX = (int)MathF.Floor((_camera.Position.X - halfW) / Chunk.TileSize);
+        _visMaxX = (int)MathF.Floor((_camera.Position.X + halfW) / Chunk.TileSize);
+        _visMinY = (int)MathF.Floor((_camera.Position.Y - halfH) / Chunk.TileSize);
+        _visMaxY = (int)MathF.Floor((_camera.Position.Y + halfH) / Chunk.TileSize);
+        _light.Update(chunks, _visMinX, _visMinY, _visMaxX, _visMaxY);
+    }
 
-        if (origin.X > _camera.Position.X + halfW || origin.X + chunkPixelSize < _camera.Position.X - halfW ||
-            origin.Y > _camera.Position.Y + halfH || origin.Y + chunkPixelSize < _camera.Position.Y - halfH)
-            return;
+    private static Color Scale(Color c, float f) => new(
+        (int)Math.Min(255f, c.R * f), (int)Math.Min(255f, c.G * f), (int)Math.Min(255f, c.B * f), c.A);
 
-        // Pass 1: black underlay covering each solid tile's full cell — the inset
-        // fill on top leaves the gutter showing through as a thin border line.
-        // Separate from the fill pass so the batch switches texture once per chunk,
-        // not once per tile.
+    private void DrawChunk(Chunk chunk, ChunkMap chunks)
+    {
+        // Clip the chunk's tiles to the visible window: culls the chunk outright when
+        // it is offscreen, and keeps every neighbour test inside the light field.
+        int baseX = chunk.ChunkPos.X * Chunk.Size, baseY = chunk.ChunkPos.Y * Chunk.Size;
+        int tx0 = Math.Max(0, _visMinX - baseX), tx1 = Math.Min(Chunk.Size - 1, _visMaxX - baseX);
+        int ty0 = Math.Max(0, _visMinY - baseY), ty1 = Math.Min(Chunk.Size - 1, _visMaxY - baseY);
+        if (tx0 > tx1 || ty0 > ty1) return;
+        const int T = Chunk.TileSize, S = SilhouettePx;
+
+        // Pass 1 (pixel): an underlay covering each solid tile's full cell — the inset
+        // fill on top leaves it showing through as the tile's border lines. Separate
+        // from the fill pass so the batch switches texture once per chunk, not per tile.
         //
-        // Charged tiles invert it: a white border instead of a black one. The fill tint
-        // alone can't carry the state for every material — foam's base color is already
-        // near-white — so the gutter does the work the fill can't.
-        for (int tx = 0; tx < Chunk.Size; tx++)
-            for (int ty = 0; ty < Chunk.Size; ty++)
+        // The underlay is a darker shade of the tile's own fill, so interior edges read
+        // as a faint grid inside one body; edges against a non-solid cell get the strong
+        // silhouette colour, on all four sides (the fill pass cuts itself back on an
+        // exposed left/top, which the right/bottom gutter alone never outlined).
+        //
+        // Charged tiles invert it: a white border instead of a dark one, on every side.
+        // The fill tint alone can't carry the state for every material — foam's base
+        // color is already near-white — so the border does the work the fill can't.
+        for (int tx = tx0; tx <= tx1; tx++)
+            for (int ty = ty0; ty <= ty1; ty++)
             {
-                if (!chunk.Tiles[tx, ty].IsSolid) continue;
-                bool charged = chunks.Charge.IsCharged(
-                    chunk.ChunkPos.X * Chunk.Size + tx, chunk.ChunkPos.Y * Chunk.Size + ty);
-                _spriteBatch.Draw(_pixel, new Rectangle(
-                    (int)(origin.X + tx * Chunk.TileSize),
-                    (int)(origin.Y + ty * Chunk.TileSize),
-                    Chunk.TileSize, Chunk.TileSize), charged ? Color.White : Color.Black);
+                int i = tx * Chunk.Size + ty;
+                if (!chunk.Tiles[tx, ty].IsSolid) { _tileFlags[i] = 0; continue; }
+                int gtx = baseX + tx, gty = baseY + ty;
+                var type = chunk.Tiles[tx, ty].Type;
+                var baseColor = TilePalette.BaseColor(type);
+
+                // Tint order: palette → variation × light → damage. Charge goes on last,
+                // in the fill pass.
+                var color = Scale(baseColor, TileVariation.Brightness(type, gtx, gty) * _light.ShadeAt(gtx, gty));
+                float dmgFrac = MathF.Min(chunks.Damage.Get(gtx, gty) / TileDamage.MaxHPFor(type), 1f);
+                if (dmgFrac > 0f) color = Color.Lerp(color, Color.Black, dmgFrac * DamageDarkness);
+                _tileColor[i] = color;
+
+                int flags = 0;
+                if (!_light.IsSolid(gtx - 1, gty)) flags |= EdgeLeft;
+                if (!_light.IsSolid(gtx, gty - 1)) flags |= EdgeTop;
+                if (!_light.IsSolid(gtx + 1, gty)) flags |= EdgeRight;
+                if (!_light.IsSolid(gtx, gty + 1)) flags |= EdgeBottom;
+                bool charged = chunks.Charge.IsCharged(gtx, gty);
+                if (charged) flags |= TileCharged;
+                _tileFlags[i] = (byte)(flags | 128);
+
+                int x = gtx * T, y = gty * T;
+                _spriteBatch.Draw(_pixel, new Rectangle(x, y, T, T),
+                    charged ? Color.White : Color.Lerp(color, Color.Black, InteriorLineDarkness));
+                if (charged || (flags & (EdgeLeft | EdgeTop | EdgeRight | EdgeBottom)) == 0) continue;
+                var sil = Color.Lerp(baseColor, Color.Black, SilhouetteDarkness);
+                if ((flags & EdgeLeft)   != 0) _spriteBatch.Draw(_pixel, new Rectangle(x, y, S, T), sil);
+                if ((flags & EdgeRight)  != 0) _spriteBatch.Draw(_pixel, new Rectangle(x + T - S, y, S, T), sil);
+                if ((flags & EdgeTop)    != 0) _spriteBatch.Draw(_pixel, new Rectangle(x, y, T, S), sil);
+                if ((flags & EdgeBottom) != 0) _spriteBatch.Draw(_pixel, new Rectangle(x, y + T - S, T, S), sil);
             }
 
-        // Pass 2: palette-tinted fills, modulated by the rock grain atlas when present.
-        for (int tx = 0; tx < Chunk.Size; tx++)
-            for (int ty = 0; ty < Chunk.Size; ty++)
+        // Pass 2 (atlas, or pixel without one): the fills, modulated by the rock grain
+        // when present. A tile is up to three stacked strips — top highlight band, body,
+        // underside shadow band — all cut from the tile's one grain patch, so the bands
+        // keep the grain and the pass stays on a single texture. A SpriteBatch tint can
+        // only darken, hence the highlight is a lighter tint colour, not a brighter one.
+        for (int tx = tx0; tx <= tx1; tx++)
+            for (int ty = ty0; ty <= ty1; ty++)
             {
-                if (!chunk.Tiles[tx, ty].IsSolid) continue;
-                int gtx = chunk.ChunkPos.X * Chunk.Size + tx;
-                int gty = chunk.ChunkPos.Y * Chunk.Size + ty;
+                int i = tx * Chunk.Size + ty;
+                int flags = _tileFlags[i];
+                if (flags == 0) continue;
+                int gtx = baseX + tx, gty = baseY + ty;
                 var type = chunk.Tiles[tx, ty].Type;
-                float dmgFrac = MathF.Min(chunks.Damage.Get(gtx, gty) / TileDamage.MaxHPFor(type), 1f);
-                var baseColor = TilePalette.BaseColor(type);
-                var color = dmgFrac > 0f
-                    ? Color.Lerp(baseColor, Color.Black, dmgFrac * 0.7f)
-                    : baseColor;
+                var color = _tileColor[i];
                 // Charge tints AFTER damage so a charged tile that's also cracked still
                 // reads as charged — the two are independent states, and the one the
                 // player spent a whole meter on is the one that has to survive the mix.
-                if (chunks.Charge.IsCharged(gtx, gty))
-                    color = Color.Lerp(color, Color.White, ChargeTint);
-                var dest = new Rectangle(
-                    (int)(origin.X + tx * Chunk.TileSize),
-                    (int)(origin.Y + ty * Chunk.TileSize),
-                    TileDrawSize, TileDrawSize);
-                if (Atlas != null)
-                    _spriteBatch.Draw(Atlas.Texture, dest,
-                        Atlas.SourceFor(type, gtx, gty, TileDrawSize), color);
-                else
-                    _spriteBatch.Draw(_pixel, dest, color);
+                // It goes over the cap bands too, for the same reason.
+                bool charged = (flags & TileCharged) != 0;
+
+                int cellX = gtx * T, cellY = gty * T;
+                int x0 = cellX + ((flags & EdgeLeft) != 0 ? S : 0);
+                int y0 = cellY + ((flags & EdgeTop)  != 0 ? S : 0);
+                int x1 = cellX + TileDrawSize, y1 = cellY + TileDrawSize;
+                var src = Atlas != null ? Atlas.SourceFor(type, gtx, gty, TileDrawSize) : default;
+
+                if ((flags & EdgeTop) != 0 && y1 - y0 > CapBandPx)
+                {
+                    FillStrip(new Rectangle(x0, y0, x1 - x0, CapBandPx), cellX, cellY, src,
+                        Color.Lerp(color, CapLight, CapHighlight), charged);
+                    y0 += CapBandPx;
+                }
+                if ((flags & EdgeBottom) != 0 && y1 - y0 > CapBandPx)
+                {
+                    FillStrip(new Rectangle(x0, y1 - CapBandPx, x1 - x0, CapBandPx), cellX, cellY, src,
+                        Color.Lerp(color, Color.Black, CapShadow), charged);
+                    y1 -= CapBandPx;
+                }
+                if (SideFaceShadow > 0f)
+                {
+                    var side = Color.Lerp(color, Color.Black, SideFaceShadow);
+                    if ((flags & EdgeLeft) != 0 && x1 - x0 > TileGutter)
+                    {
+                        FillStrip(new Rectangle(x0, y0, TileGutter, y1 - y0), cellX, cellY, src, side, charged);
+                        x0 += TileGutter;
+                    }
+                    if ((flags & EdgeRight) != 0 && x1 - x0 > TileGutter)
+                    {
+                        FillStrip(new Rectangle(x1 - TileGutter, y0, TileGutter, y1 - y0), cellX, cellY, src, side, charged);
+                        x1 -= TileGutter;
+                    }
+                }
+                FillStrip(new Rectangle(x0, y0, x1 - x0, y1 - y0), cellX, cellY, src, color, charged);
             }
+    }
+
+    // One strip of a tile's fill. `src` is the tile's whole grain patch (cell-sized,
+    // 1:1 with pixels); the strip samples the part of it that it covers, so cutting a
+    // fill into strips never shifts the grain.
+    private void FillStrip(Rectangle dest, int cellX, int cellY, Rectangle src, Color color, bool charged)
+    {
+        if (charged) color = Color.Lerp(color, Color.White, ChargeTint);
+        if (Atlas != null)
+            _spriteBatch.Draw(Atlas.Texture, dest,
+                new Rectangle(src.X + dest.X - cellX, src.Y + dest.Y - cellY, dest.Width, dest.Height), color);
+        else
+            _spriteBatch.Draw(_pixel, dest, color);
     }
 }

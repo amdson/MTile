@@ -68,7 +68,7 @@ Suggested order: the five no-sim-work items (wall scrape, respawn, and the three
 - [ ] **Block-grab peel tension + snap** — tension loop on `PeelStrain` (0..1); snap when the group tears free.
 - [ ] **Orb throw / impact** — the thrown peel orb.
 - [ ] **Mass ball in flight** — whoosh loop, voice-capped.
-- [ ] **Foam puff / foam decay pop** — `BlockBurstAction`; foam expiring.
+- [ ] **Foam decay pop** — foam expiring. (The foam puff went with `BlockBurstAction`, removed 2026-11-13.)
 - [ ] **Spikes place / impale** — picker key 5.
 - [ ] **Sprout growth / terrain-carried rumble** — low loop.
 - [ ] **Meter empty** — "out of material" click when a build input does nothing.

@@ -73,10 +73,23 @@ public sealed class TileTextureAtlas
         // Both rock materials take the rock patch; hardened is distinguished by its
         // (much darker) palette tint, not by a different grain.
         int patch = type is TileType.Stone or TileType.Hardened ? 0 : _patchCount - 1;
-        uint h = (uint)(gtx * 73856093) ^ (uint)(gty * 19349663);
-        int range = PatchSize - size;
-        int ox = (int)(h % (uint)range);
-        int oy = (int)((h >> 8) % (uint)range);
+        // Avalanche the coords before slicing offsets out of them. The bare
+        // multiply-xor this replaced had ox and oy drawn from overlapping bits of one
+        // weakly-mixed word, so cells along some diagonals landed on the same or
+        // adjacent grain and the repeat was visible as faint streaks.
+        uint h;
+        unchecked
+        {
+            h = ((uint)gtx * 0x27D4EB2Du) ^ ((uint)gty * 0x165667B1u + 0x9E3779B9u);
+            h ^= h >> 16; h *= 0x7FEB352Du;
+            h ^= h >> 15; h *= 0x846CA68Bu;
+            h ^= h >> 16;
+        }
+        // Independent halves for the two axes. Max(1) so a caller asking for a
+        // full-patch rect gets offset 0 instead of a divide by zero.
+        uint range = (uint)Math.Max(1, PatchSize - size + 1);
+        int ox = (int)((h & 0xFFFF) % range);
+        int oy = (int)((h >> 16) % range);
         return new Rectangle(patch * PatchSize + ox, oy, size, size);
     }
 }

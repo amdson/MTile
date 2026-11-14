@@ -158,6 +158,18 @@ public static partial class Stages
             Populate      = PopulateStormcaller,
         });
 
+        // ─── frogs ────────────────────────────────────────────────────────────
+        // The Frog Swarm (the Warlord hall): 24 frogs that hop about and divide, up to
+        // FrogEnemy.Cap alive at once; a split sometimes makes a kamikaze mutant, and
+        // always does once more than 24 are alive. Kill them all — a fresh 24 arrive 4 s
+        // later. See Entities/Enemies/Types/FrogEnemy.cs.
+        Register(new Stage {
+            Name          = "frogs",
+            TerrainConfig = "warlord.json",
+            PlayerSpawn   = WarlordPlayerSpawn,
+            Populate      = PopulateFrogs,
+        });
+
         // ─── spearman ─────────────────────────────────────────────────────────
         // SpearmanEnemy demo, on the Warden's terrain (Levels/warden.json). One
         // Spearman holds the 3-block ledge to your right — it won't walk off it, so
@@ -1180,6 +1192,32 @@ public static partial class Stages
             foreach (var e in g.Entities)
                 if (e.Kind == EntityKind.Stormcaller && !e.IsDead) return;
             g.SpawnEntity(new StormcallerEnemy(StormcallerSpawn));
+        });
+    }
+
+    private const int FrogSeedCount = 24;
+
+    private static void SpawnFrogs(Simulation g)
+    {
+        // Two tiles apart, from just right of the player's spawn to near the right wall.
+        for (int i = 0; i < FrogSeedCount; i++)
+            g.SpawnEntity(new FrogEnemy(new Vector2((2 + 2 * i) * Chunk.TileSize,
+                                                    WarlordFloorTopY - FrogEnemy.Height * 0.5f - 2f)));
+    }
+
+    private static void PopulateFrogs(Simulation g)
+    {
+        SpawnFrogs(g);
+
+        // A new swarm on the 4 s beat once no frog is alive. Pure function of sim state.
+        int period = SimFrames.FromSeconds(4f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            foreach (var e in g.Entities)
+                if (e is FrogEnemy && !e.IsDead) return;
+            SpawnFrogs(g);
         });
     }
 

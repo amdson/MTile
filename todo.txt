@@ -37,3 +37,27 @@ M. Open follow-ups from the 2026-11-05 combat frame-data pass (branch combat-fra
   0.7; the spearman's throw-back vs a grounded victim (K3). Legacy-brain bot residuals in BACKLOG 5.23.
 - HitEvictionTests.GuardReturnsAfterReleasingTheButton: red on main (gesture bug), retimed to the real stab, still red -
   the stab-launched victim never re-raises guard inside the run; untraced.
+
+
+V. Graphics depth pass - the game reads "flat" (2026-11-13 frame review: the background out-contrasts the play layer,
+   terrain is a uniform grid, nothing grounds the characters). All render-only; nothing here may touch the sim.
+   In priority order (payoff per effort):
+- V1. (built 2026-11-14, tune by eye) Push the background back: desaturate + fog-tint the parallax layers ~30-40%, more for farther layers
+  (atmospheric perspective). The haze on the right of the forest already does this; make it the rule.
+- V2. (built 2026-11-14, tune by eye) Edge-aware terrain: strong outline only where a tile borders air; interior
+  edges keep a thin line in a darker shade of the tile's own material (ChunkRenderer).
+- V3. (built 2026-11-14 as sky-light propagation, Drawing/TerrainLightField.cs; tune by eye) Terrain depth darkening: shade tiles by distance to the nearest air cell, so interiors fall toward dark and
+  freshly carved faces read bright.
+- V4. (built 2026-11-14, tune by eye) Surface cap: lighter top edge (grass / highlight) on exposed tops, darker underside.
+- V5. (built 2026-11-14, tune by eye) Blob shadows: soft dark ellipse under each character and entity, shrinking with height.
+- V6. Character rim light or outline, so they read against any background.
+- V7. (built 2026-11-14 as a per-column ground line + light rule, no stored record of dug cells; tune by eye) Back wall: where tiles are carved out below the surface, show a dark version of the material rather than sky,
+  so holes read as caves.
+- V8. (built 2026-11-14, tune by eye) Break up tile repetition: per-tile texture variation by position hash, large-scale noise across tile borders.
+- V9. Foreground parallax layer: dark, blurred silhouettes (branches, grass) passing in front of the play layer.
+- V10. Ambient motion: drifting motes / leaves, swaying grass on tile tops, dust on landing and tile breaks.
+- V11. Light sources: attacks / glows / crystals emit into TerrainLightField (sky light only today) so they light
+  nearby terrain. Replaces the separate render-target light-map idea.
+- V12. Bloom on the existing glow effects, subtle vignette, one colour grade across all layers.
+- V13. (built 2026-11-14, tune by eye) Grass caps on dirt (Drawing/GrassField.cs, render-only): starting dirt is grassed,
+  new dirt starts bare and catches grass from a grassy neighbour (~10 s) or self-seeds (~45 s); buried grass dies.

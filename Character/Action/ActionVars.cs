@@ -47,7 +47,7 @@ public struct ActionVars
     public float   TipExt;            // Stab — live tip extension; drives the per-frame
                                       // hitbox lengths (sim) AND the glow tip (render)
 
-    public Vector2 OriginCell;        // BlockPlace (last placed cell), BlockBurst (target cell)
+    public Vector2 OriginCell;        // BlockPlace (last placed cell)
 
                                       // (sim state: it drives hitbox placement).
 

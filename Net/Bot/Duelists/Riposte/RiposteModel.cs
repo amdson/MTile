@@ -35,7 +35,7 @@ public sealed class RiposteModel
         || a == "AirHammerAction" || a == "PulseAction" || a == "BurstAction" || a == "GrabAction";
 
     public static bool IsRanged(string a)
-        => a == "BlockPaintAction" || a == "BlockPlaceAction" || a == "BlockBurstAction"
+        => a == "BlockPaintAction" || a == "BlockPlaceAction"
         || a == "LobbedAreaAction" || a == "BlockGrabAction";
 
     // How readily they swing when I'm close: attack starts per second spent in the zone.

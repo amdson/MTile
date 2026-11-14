@@ -17,7 +17,7 @@ public class ClipBindingTests
 {
     // Actions the animator deliberately treats as "no overlay" (CharacterAnimator.IsOverlayAction).
     private static readonly HashSet<string> NoOverlay = new(StringComparer.Ordinal)
-        { "NullAction", "ReadyAction", "RecoveryAction" };
+        { "NullAction", "ReadyAction", "RecoveryAction", "BlockPlaceAction", "BlockPaintAction" };
 
     // Every concrete ActionState in the assembly, by class name.
     private static List<string> ActionClassNames()
@@ -80,6 +80,8 @@ public class ClipBindingTests
         var known = new HashSet<string>(NoOverlay, StringComparer.Ordinal)
         {
             "ClimbHands",   // consumed by ParkourDriver as a movement overlay, not an action
+            "LandRun",      // GroundLocomotionDriver's run-landing overlay, likewise
+            "RunStart", "RunPivot",   // ...and its sprint-start / turn-around overlays
         };
         var orphans = Clips()
             .Where(c => !Enum.TryParse<AnimClip>(c.Type, ignoreCase: true, out _))
@@ -141,6 +143,13 @@ public class ClipBindingTests
         var dangling = Clips().Where(c => c.SettleClip != null && !types.Contains(c.SettleClip))
                               .Select(c => $"{c.Name} -> {c.SettleClip}").ToList();
         Assert.True(dangling.Count == 0, "SettleClip names no authored clip: " + string.Join(", ", dangling));
+
+        // The stab charge's three stances: RecoveryAction names Charge / ChargeAir and the
+        // animator swaps in ChargeRun on the move. All play on the charge clock, so all loop.
+        var charge = Clips().Where(c => c.Type.StartsWith("RecoveryAction.", StringComparison.Ordinal)).ToList();
+        foreach (var t in new[] { "RecoveryAction.Charge", "RecoveryAction.ChargeRun", "RecoveryAction.ChargeAir" })
+            Assert.Contains(t, types);
+        Assert.All(charge, c => Assert.True(c.Loop, c.Name + " plays on the charge clock and must loop"));
 
         foreach (var t in new[] { "GrabAction", "GrabAction.Hold", "GrabAction.Throw", "GrabAction.Whiff" })
             Assert.Contains(t, types);

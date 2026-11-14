@@ -86,6 +86,8 @@ public sealed class SolveProblem
     public bool    AimActive;
     public Vector2 AimTarget;             // û*: frozen target unit vector of the action aim row
     public int     AimBoneL, AimBoneR;    // the L→R hand pair whose vector encodes the aim
+    public int     AimBoneR2 = -1;        // optional second tip aimed from the same AimBoneL (a two-armed hold); -1 = none
+    public Vector2 AimTarget2;            // its frozen target
 
     // ── Weights and prior anchors ─────────────────────────────────────────────────────
     public AnimSolverConfig Cfg;          // this frame's EFFECTIVE config (driver overrides applied)

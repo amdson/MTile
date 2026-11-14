@@ -84,6 +84,9 @@ public static class EntityFactory
         EntityKind.Stormcaller => new StormcallerEnemy(pos),
         EntityKind.Spearman  => new SpearmanEnemy(pos),
         EntityKind.Pulser    => new PulserEnemy(pos),
+        // Random stream, timers and state come back through ReadState.
+        EntityKind.Frog       => new FrogEnemy(pos),
+        EntityKind.FrogMutant => new FrogEnemy(pos, mutant: true),
         _ => null,
     };
 

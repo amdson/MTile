@@ -197,6 +197,39 @@ public class ActionOverlayTests
         Assert.Equal(0f, anim.State.ActionWeight);
     }
 
+    // RecoveryAction binds no base clip, but the phase it names while charging
+    // ("RecoveryAction.Charge", a looping stance) does drive the overlay — and the last
+    // swing's settle still outranks it while the recovery countdown runs.
+    [Fact]
+    public void VariantOnlyAction_BindsItsPhaseClip_ButNotOverASettle()
+    {
+        var skel = SkeletonExamples.Biped();
+        var charge = BuildSlashClip(skel, "charge", "RecoveryAction.Charge", armStart: -1.5f, armEnd: -1.5f);
+        charge.Loop = true;
+        var anim = new CharacterAnimator(skel, 0.6f, new[]
+        {
+            BuildWalkClip(skel), charge,
+            BuildSlashClip(skel, "settle", "SettleSlash", armStart: 0.5f, armEnd: SlashArm, settleShare: 0.5f),
+        });
+        var st = new DriveState();
+        Drive(anim, skel, ref st, frames: 20, action: "RecoveryAction");
+        Assert.Equal(0f, anim.State.ActionWeight);
+
+        st.Variant = "Charge";
+        Drive(anim, skel, ref st, frames: 30, action: "RecoveryAction");
+        Assert.True(anim.State.ActionWeight > 0.9f, "the charge stance should be bound while charging");
+        int arm = skel.IndexOf("arm_r_upper");
+        float charged = anim.Pose.Local[arm].Rotation;
+
+        // A swing, then its end-lag with the charge already held: the settle keeps the slot.
+        st.Variant = null; st.ActionProgress = 1f;
+        Drive(anim, skel, ref st, frames: 20, action: "SettleSlash");
+        st.Variant = "Charge"; st.ActionProgress = null; st.RecoveryFramesLeft = 20;
+        Drive(anim, skel, ref st, frames: 10, action: "RecoveryAction");
+        Assert.True(MathF.Abs(anim.Pose.Local[arm].Rotation - charged) > 0.3f,
+            "the settle tail, not the charge stance, should be drawn through the end-lag");
+    }
+
     // An action with no authored clip gets no overlay (exact-name mapping, no fallback).
     [Fact]
     public void MissingClip_NoOverlay()

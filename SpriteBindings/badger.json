@@ -62,7 +62,7 @@
     {
       "Name": "head",
       "Image": "badger/head.png",
-      "OffsetX": 132,
+      "OffsetX": 143,
       "OffsetY": 112,
       "Bones": [
         "head"
