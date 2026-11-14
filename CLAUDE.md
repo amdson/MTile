@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A 2D platformer in C#/MonoGame built around free movement and editable terrain. The player slashes, stabs, pulses, and erupts blocks to reshape a chunked tile world while moving through it. Fixed timestep of 60 fps (`Simulation.FixedDt`).
 
-**Read [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md) first** — it is the authoritative architecture doc (sim/ECS/rollback, physics, character FSMs, combat, world/tiles, animation, drawing). This file covers build/run/test mechanics, project layout, and the conventions that bite hardest. Design notes and roadmaps live in [Plans/](Plans/).
+**Read [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md) first** — it is the authoritative architecture doc (sim/ECS/rollback, physics, character FSMs, combat, world/tiles, animation, drawing). This file covers build/run/test mechanics, project layout, and the conventions that bite hardest. One level below the overview, each source area has a stamped `MAP.md` beside its code (file index, per-frame flow with `file:line`, traps, tests) — read the area's map before opening its files; the table is in the overview's "Per-area maps" section, and `scripts/check-maps.py` lists the ones that have gone stale. Design notes and roadmaps live in [Plans/](Plans/).
 
 ## Project layout
 
@@ -26,11 +26,11 @@ codebase-wide edit.
 | `MTile.Web/` | Blazor WebAssembly host via the **KNI** MonoGame variant (`nkast.Xna.Framework`). Does **not** ProjectReference Core — KNI is a different assembly identity, so it re-globs the same root `.cs` and compiles them a second time. Also excludes `MTile.Rtc/`; the browser transport is `wwwroot/mtileRtc.js`. **Now runtime-verified and deployed** — browser PvP works over WebRTC with Firestore room codes. See `Plans/WEB_PVP.md` (operator guide) and `Plans/INTERNET_READY_PLAN.md` (what's left). |
 | `MTile.Tests/` | xUnit. ProjectReferences `MTile.Core`. |
 | `MTile.Probe/` | Headless animation CLI — the clip-authoring workhorse (`list/digest/diff/new/addkey/ik/contact/rot/retime/stretch/…`, `--rig`). Writes clips in place. |
-| `MTile.Demo/` | Windowed tooling: animation editor, sprite-bind editor + art import (`--bind`), take viewer (`--load Takes/*.take.json`), reference-arc editor. |
+| `MTile.Demo/` | Windowed tooling: animation editor, sprite-bind editor (`--bind`), art import (`--import`), take viewer (`--load Takes/*.take.json`), reference-arc editor (`--ref`), strip exporter (`--strip`), tree viewer (`--trees`). Not in `MTile.sln`; build it by project. |
 | `MTile.Rtc/` | WebRTC transport for the rollback netcode. |
 | `MTile.Bench/`, `MTile.FxLab/` | Perf harness; shader/VFX lab. |
 
-`MTile.sln` contains Core + Desktop + Tests. `MTile.Web.sln` is separate **by design** — including Web would pull KNI's emcc native build into every desktop build.
+`MTile.sln` contains Core + Desktop + Tests + Rtc. `MTile.Web.sln` is separate **by design** — including Web would pull KNI's emcc native build into every desktop build.
 
 Because the same source compiles under both DesktopGL and KNI, **don't use APIs that exist in only one variant.** A change that builds via `MTile.Core` can still break the web build.
 
@@ -45,15 +45,15 @@ dotnet run --project MTile.Desktop          # launches the game window
 scripts/test-group.py combat                # one group, ~2 s
 scripts/test-group.py combat animation      # several groups
 scripts/test-group.py list                  # what the groups contain
-scripts/test-group.py full                  # the periodic sweep, ~18 s
+scripts/test-group.py full                  # the periodic sweep, ~10 min (was ~18 s)
 dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName~SnapshotRoundTrip"   # single class/test
 dotnet watch test --project MTile.Tests/MTile.Tests.csproj   # re-run on change
 ```
 
 ## Which tests to run
 
-The suite is ~724 tests across 136 classes. **Default to the group(s) your change touches**
-(`scripts/test-group.py <group>`) — that is seconds, and a spot change to one subsystem cannot
+The suite is ~1,970 tests across ~280 test files (measured 2026-11-14; the per-group sizes in the table below predate that growth, so read them as relative). **Default to the group(s) your change touches**
+(`scripts/test-group.py <group>`) — that is seconds to a minute, and a spot change to one subsystem cannot
 break the others. Reach for `full` at the END of a piece of work, before committing, or when a
 change is genuinely cross-cutting (a shared base class, `Hitbox`/`HitResolver`, the ECS, a config
 loader). Do not run the whole suite after every edit.
@@ -68,8 +68,10 @@ loader). Do not run the whole suite after every edit.
 | `animation` | `Animation/`, `Skeletons/`, `SkeletonStates/`, `Drawing/` rig code | 1 s / 91 |
 | `simcore` | `Simulation.cs`, `Sim/`, `Net/`, `configs/`, `Stage.cs` | 4 s / 69 |
 
-Groups overlap on purpose and are matched on test-class NAME, not namespace (`GrabTests` is in
-`MTile.Tests`, `CaveMouthTests` in `MTile.Tests.Sim`). **When you add a test class, make sure its
+Groups overlap on purpose. A term is matched as a substring of the test's fully-qualified name
+(`FullyQualifiedName~term`), so it hits the class name wherever the class lives (`GrabTests` is in
+`MTile.Tests`, `CaveMouthTests` in `MTile.Tests.Sim`) — and also any test METHOD whose name contains
+the term, which is how a few tests of a class run in a group the class is not in. **When you add a test class, make sure its
 name matches a term in `scripts/test-group.py`** — a class matching nothing runs only in the full
 sweep, which is how group coverage silently rots.
 
@@ -114,7 +116,7 @@ Content (`.xnb`) is built from `Content/Content.mgcb` by `MonoGame.Content.Build
 
 All five runtime configs live in **`configs/`**:
 
-- `configs/movement_config.json` — movement tuning, **hot-reloaded** via `FileSystemWatcher` (gated by `GameConfig.HotReloadMovementConfig`; off in multiplayer). Edit while the game runs to retune.
+- `configs/movement_config.json` — movement tuning, **hot-reloaded** via `FileSystemWatcher` (gated by `GameConfig.HotReloadMovementConfig`, and forced off whenever `Game1` has a `NetSetup`). Edit while the game runs to retune.
 - `configs/game_config.json` — match/stage config (`GameConfig`).
 - `configs/anim_solver_config.json` — animation-solver weights/limits. Render-only, so hot-reload is always safe (no multiplayer gate).
 - `configs/impact_profiles.json`, `configs/material_strengths.json` — per-body impact tuning and per-tile-type strength/build cost. Loaded once at boot: both are sim-affecting, so a mid-match reload would desync rollback peers.
@@ -139,14 +141,14 @@ Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unche
 
 **[BACKLOG.md](BACKLOG.md) is the single list of outstanding work** — movement, animation, combat, engineering debt, and the deliberately-skipped tests, each with a verified status and file evidence. It replaced the old scattered `todo.txt` / `anim_todo.txt` / `movement_todo.md` files; add new items there.
 
-- **The corrector** (`Character/Corrector/LatticePathPlanner.cs`, `LatticeTracker.cs`, `PathTracker.cs`, `CorrectorChannels.cs`, `CorrectionSolver.cs`, …) — free-state locomotion is solver-driven on ONE fold engine, the lattice (the `qp`/`ref`/`lm` engines and the `FoldEngine` knob were removed 2026-11-09), and this is the actively-tuned area. `BallisticPredictor` + `ManeuverCorrector` survive only as the climb family's trigger probe. Hot-reload ablation knobs: `CorrectorVaultEnabled`, `FoldRedirectEnabled`. A refactor toward environment → resources → states is planned in `Plans/MOVEMENT_RESOURCE_MODEL.md` (goals in `todo_movement.txt`).
+- **The corrector** (`Character/Corrector/LatticePathPlanner.cs`, `LatticeTracker.cs`, `PathTracker.cs`, `CorrectorChannels.cs`, `CorrectionSolver.cs`, …) — free-state locomotion is solver-driven on ONE fold engine, the lattice (the `qp`/`ref`/`lm` engines and the `FoldEngine` knob were removed 2026-11-09), and this is the actively-tuned area. `BallisticPredictor` + `ManeuverCorrector` survive as the climb family's trigger probe (`ManeuverCorrector.Apply` is dead; only `Run` is called), plus `BallisticPredictor`'s reach constants, which `EnvironmentContext.Support` and the lattice planner still read. Ablation knobs: `CorrectorClimbEnabled`, `FoldRedirectEnabled` (both code defaults in `MovementConfig`; neither is in the JSON, so add the key to toggle one). A refactor toward environment → resources → states is planned in `Plans/MOVEMENT_RESOURCE_MODEL.md` (goals in `todo_movement.txt`).
 - **The animation solver** (`Animation/`) — vertical cadence/constraints shipped; horizontal `d.x`/ComOffset, joint limits, and local-SDF non-penetration are still open (`Plans/ANIMATION_SOLVER_PLAN.md` §11.6 Phase 4).
-- **Clip annotations** (points / elements / contacts / curves, and the `MTile.Demo` editor that authors them) — **read [Plans/ANIMATION_ANNOTATIONS.md](Plans/ANIMATION_ANNOTATIONS.md) first.** It covers the data model, how `ContactSource` becomes a solver row, the invariants that bite (a shared-static default curve, a resolver that throws in the solve path but must not in draw paths, loop-seam spans), and **why the suite is ~96 red right now** — the clip library is blank stubs pending a re-author, so tests that read clip content fail by design (BACKLOG §5.0).
+- **Clip annotations** (points / elements / contacts / curves, and the `MTile.Demo` editor that authors them) — **read [Plans/ANIMATION_ANNOTATIONS.md](Plans/ANIMATION_ANNOTATIONS.md) first.** It covers the data model, how `ContactSource` becomes a solver row, the invariants that bite (a shared-static default curve, a resolver that throws in the solve path but must not in draw paths, loop-seam spans), and the clip-content reds in BACKLOG §5.0. That section was written when the clip library was blank stubs; as of 2026-11-14 it is re-authored (64 clips per rig, 61 with real multi-key poses), so check the current red list instead of assuming ~96.
 - **Browser PvP** — works end to end (WebRTC + Firestore room codes, deployed to GitHub Pages). What's left before strangers can play: TURN (STUN-only today, so symmetric NAT/CGNAT fails), desync/disconnect handling, and a Firestore-path smoke test. `Plans/INTERNET_READY_PLAN.md`.
 - **Terrain building** — the paint/place/burst/peel + mass-economy rework replaced the old eruption planners. Actively evolving.
 - Known gaps worth not rediscovering: 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
 
-`MTile.Tests/Sim/` (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport`) is the headless analogue of the sim — scenario tests with ascii terrain + scripted input, mirroring the same phase ordering as `Simulation.Step`. Use it for deterministic gameplay tests.
+`MTile.Tests/Sim/` (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport`) is the headless analogue of the sim — scenario tests with ascii terrain + scripted input, following the same phase ordering as `Simulation.Step` but only a partial mirror of it (`Run` has no entities or combat; `RunMulti` skips terrain streaming, tickers, respawn, spikes, crystals and charged blasts — `Sim/MAP.md`). Use it for deterministic gameplay tests; build a real `Simulation` when the test needs the whole loop.
 
 ## Key conventions (see CODEBASE_OVERVIEW.md for the full set)
 

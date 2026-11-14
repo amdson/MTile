@@ -19,6 +19,7 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 | [`sync-rabbit-derived.sh`](sync-rabbit-derived.sh) | Regenerate the rabbit/badger clip pool `SkeletonStates/biped_rabbit/` from the biped pool: probe retarget + bakeyaw. Overwrites every clip except the hand-kept ones listed in the script's `KEEP` (stairs, stepup). |
 | [`competition.py`](competition.py) | Fighter competition git plumbing: `base` (cut the holdout-free base branch in a temp worktree), `worktree` (one competitor branch), `collect` (accept one-new-package branches and copy the file in, never merge), `brief` (render `Plans/FIGHTER_COMPETITOR_BRIEF.md` for a slot). See `Plans/FIGHTER_COMPETITION.md`. |
 | [`test-group.py`](test-group.py) | Run one subsystem's slice of the xUnit suite instead of all ~724 tests. `list` / `<group>` / `full`. |
+| [`check-maps.py`](check-maps.py) | List the per-area `MAP.md` files whose covered code has commits newer than their `Verified against:` stamp. `--stale` (exit 1 if any) / `-v` (show the commits). |
 | [`vm-bootstrap.sh`](vm-bootstrap.sh) | Bootstrap a fresh Ubuntu/Debian cloud VM for headless build + test. |
 | [`GCP_SETUP.md`](GCP_SETUP.md) | Operator notes for the GCP dev box that `vm-bootstrap.sh` provisions. |
 

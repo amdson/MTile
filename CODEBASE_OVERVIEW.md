@@ -1,10 +1,29 @@
 # MTile — Codebase Overview
 
-A 2D platformer in C#/MonoGame about "the terrain IS the weapon" — the player slashes, stabs, pulses, fires, and erupts blocks to shape the battlefield while moving through chunked tile terrain. Project root: `c:\Users\amdic\dev\MTile`.
+A 2D platformer in C#/MonoGame about "the terrain IS the weapon" — the player slashes, stabs, pulses, fires, and erupts blocks to shape the battlefield while moving through chunked tile terrain. 
 
 The game logic lives at the repo root and is compiled by several hosts (see `CLAUDE.md` for the project layout and build commands): `MTile.Core` (the library), `MTile.Desktop` (DesktopGL host), `MTile.Web` (KNI/Blazor WASM host), `MTile.Tests` (xUnit), plus the tooling projects `MTile.Probe`, `MTile.Demo`, `MTile.Bench`, `MTile.FxLab` and the `MTile.Rtc` transport. Fixed timestep of 60 fps (`Simulation.FixedDt = 1/60`).
 
 > **Architecture in one sentence:** [`Simulation`](Simulation.cs) is the deterministic game world that advances on inputs alone via `Step(PlayerInput)`; [`Game1`](Game1.cs) is the render/input shell around it; snapshot/restore and the rollback session on top of it are **built and running** (`Net/`), not aspirational.
+
+## Per-area maps
+
+This file is the architecture level. One level down, each source area has a `MAP.md` beside its code: a file-by-file index (with section indexes for the big files), the per-frame flow with `file:line` anchors, the invariants and traps, "where to change X", and which tests cover it. **Read the map for an area before opening its files.**
+
+| Area | Map |
+|---|---|
+| Sim core: `Simulation.cs`, `Stage.cs`, `Sim/` (ECS), `Physics/` | [Sim/MAP.md](Sim/MAP.md) |
+| `World/` tiles, chunks, journal, hitboxes; `Levels/`, `Stages/` | [World/MAP.md](World/MAP.md) |
+| `Character/` core: `PlayerCharacter`, `Movement/`, `Sensing/`, `Input/` | [Character/MAP.md](Character/MAP.md) |
+| `Character/Action/` (index of every action in `ActionStates.cs`) | [Character/Action/MAP.md](Character/Action/MAP.md) |
+| `Character/Corrector/` (lattice planner, trackers, solver) | [Character/Corrector/MAP.md](Character/Corrector/MAP.md) |
+| `Entities/` and the enemy framework ("add an enemy" recipes) | [Entities/MAP.md](Entities/MAP.md) |
+| `Net/` rollback session and bots; `MTile.Rtc/` | [Net/MAP.md](Net/MAP.md) |
+| `Animation/`, rigs and clip format | [Animation/MAP.md](Animation/MAP.md) |
+| `Drawing/`, `Presentation/`, the `Game1.cs` draw path | [Drawing/MAP.md](Drawing/MAP.md) |
+| Tooling: `MTile.Demo/`, `MTile.Probe/` (full command table) | [MTile.Demo/MAP.md](MTile.Demo/MAP.md) |
+
+Each map is stamped `Verified against: <commit> (<date>)` and lists the paths it `Covers:`. `scripts/check-maps.py` lists the maps whose covered code has commits newer than the stamp; a stale map still helps with navigation, but re-check its line numbers and traps against the code before relying on them, and update the stamp when you re-verify one. Where a map and this overview disagree, the map is the more recently checked.
 
 ## Top-level architecture
 
@@ -53,16 +72,20 @@ The data lattice tying the subsystems together:
 
 There are two entry points: `Step(PlayerInput)` for solo and `Step(p0, p1)` for two players (injects `p1` into the first secondary's `Controller`, then falls through to the same body). Drag-to-build is no longer a `Step` phase — it moved per-player into the terrain-building actions.
 
-**`Step` phase order** (mirrored exactly by the headless `SimRunner` so tests match real play):
-1. Inject `input`; advance the absolute sim clock `_elapsed += FixedDt`.
-2. Tick dynamic surfaces (`MovingRectangle` platforms) as a **pure function of `_elapsed`** — no hidden accumulator, so they snapshot cleanly.
-3. `ChunkMap.TickSprouts(dt)` + `ChunkMap.Impact.Tick(dt)` (decay per-cell impact accumulator).
-4. Combat frame: clear hitbox/hurtbox/**force-field** registries → every `IHittable.PublishHurtboxes` (primary, secondaries, entities in spawn order) → `_player.Update` (publishes hitboxes + fields) → secondary players → entity AI `Update` → `CombatSystem.Apply`.
-5. `ForceFieldSystem.Apply` — force fields resolve **after** every publisher has updated but **before** physics (unlike hitboxes, which resolve post-step). `onGrabHeld`/`onThrown` callbacks flag victims via `CombatState.MarkGrabbed`/`RegisterThrown`.
-6. Player respawn on death (deterministic, inside `Step`; fires `OnPlayerRespawn`).
-7. `Entity.PreStep` (gravity-scale opt-out) → `PhysicsWorld.StepSwept` → sweep up dead entities.
+**`Step` phase order** (line anchors and the physics sub-steps are in [Sim/MAP.md](Sim/MAP.md); the headless `SimRunner` follows the same order but is only a partial mirror — see Testing):
+1. Inject `input` (`Step(p0, p1)` first injects `p1` into the first secondary's `Controller`); advance the absolute sim clock `_elapsed += FixedDt` and the frame counter.
+2. `StreamTerrain` — endless (`WorldGen`) levels only, from last frame's player positions.
+3. Stage tickers, incl. dynamic surfaces (`MovingRectangle` platforms) as a **pure function of `_elapsed`** — no hidden accumulator, so they snapshot cleanly.
+4. `ChunkMap.TickSprouts(dt)` + `ChunkMap.Impact.Tick(dt)`.
+5. Combat frame: clear hitbox/hurtbox/**force-field** registries → every `IHittable.PublishHurtboxes` (primary, secondaries, entities in World order) → `_player.Update` (publishes hitboxes + fields) → secondary players → entity AI `Update` → `CombatSystem.Apply`. Hitboxes resolve here, **before** physics.
+6. `ForceFieldSystem.Apply` — after every publisher has updated, also before physics. `onGrabHeld`/`onThrown` callbacks flag victims via `CombatState.MarkGrabbed`/`RegisterThrown`.
+7. Player respawn on death (deterministic, inside `Step`; fires `OnPlayerRespawn`) — primary, then secondaries.
+8. `PreStep` on entities, then players (hitstop/rooted bodies are parked here) → spike pre-step capture → `LaunchSystem.StepSwept`, which wraps `PhysicsWorld.StepSwept` with the launch decay/reflect bookkeeping.
+9. Spike and crystal contact passes (`_spikes.Apply`, `_crystals.Apply`). These land after the respawn check, so a player they kill is dead for the next frame's tickers.
+10. Charged blocks broken this frame become `ChargedBlast` entities.
+11. Sweep up dead entities.
 
-`Checksum()` is a cheap order-stable FNV-1a fingerprint over both players' pose/velocity/health, the entity set in spawn order, and the id counters. It's the netcode desync guard, not a snapshot — a mismatch between peers at the same frame is a hard desync.
+`Checksum()` is a cheap order-stable FNV-1a fingerprint over the players' pose/velocity/health, the entity set (index, pose/velocity, health) in World order, the id counters, and terrain plus its sparse tables. Enemy AI state (FSM indices, vars, scratch) is not in it. It's the netcode desync guard, not a snapshot — a mismatch between peers at the same frame is a hard desync.
 
 ### The ECS substrate ([Sim/ECS/](Sim/ECS/))
 
@@ -77,26 +100,26 @@ Per step the World is projected into `_bodyScratch`/`_entityScratch` for the sol
 
 [`SimSnapshot`](SimSnapshot.cs) is small because the ECS World *is* the player+entity snapshot: `HitIdValue`, `World`, `Elapsed`, primary + secondary `ControllerState`s, `Dedupe`, `HitConfirm`, `Recoil`, `Platforms`, `Terrain`. The old `PlayerSnapshot[]`/`EntitySnapshot[]` arrays are gone.
 
-`Snapshot()` first syncs every live player and entity's serializable state into its World value components (`CaptureState(_world)`), then calls `_world.Capture()`. `Restore(snap)` restores the World's id bookkeeping, rewinds terrain, re-registers the live-only refs in canonical order (primary, secondaries, entities in spawn order) so iteration order — and therefore stepping — is identical, and rehydrates entities that no longer exist via `EntityFactory.Rehydrate`.
+`Snapshot()` first syncs every live player and entity's serializable state into its World value components (`CaptureState(_world)`), then calls `_world.Capture()`. `Restore(snap)` restores the World's id bookkeeping, rewinds terrain, re-registers the live-only refs in canonical order (primary, secondaries, then entities in `EntityData` order), and rehydrates entities that no longer exist via `EntityFactory.Rehydrate`. **Caveat:** that canonical order equals the pre-restore registration order only when every secondary player was registered before any entity. All shipped stages do that (P2 is added in the constructor or first in `Populate`); a stage that calls `AddSecondaryPlayer` after `SpawnEntity` would step bodies in a different order after a rollback than before it.
 
-- **Bodies** → [`BodyState`](Physics/BodyState.cs): pose + kinematics + only the **Maintained** (hard) constraints, deep-cloned. Soft state-owned contacts (`FloatingSurfaceDistance`, `PointForceContact`) are NOT captured — the owning state's idempotent `Ensure…`/`ResetTransient` rebuilds them next frame.
+- **Bodies** → [`BodyState`](Physics/BodyState.cs): pose + kinematics + **every** constraint, deep-cloned in order with its `LastImpulse` (soft state-owned contacts such as `FloatingSurfaceDistance`/`PointForceContact` included). After a restore the owning state's `ResetTransient` re-takes its cloned contact by Owner tag.
 - **Players** → `PlayerData`: FSM selection as **registry indices** (states/actions are flyweights constructed in fixed order), per-activation data as the [`MovementVars`](Character/Movement/MovementVars.cs)/[`ActionVars`](Character/Action/ActionVars.cs) value structs, helper objects deep-cloned (`PlayerAbilityState.Clone`, parser/intents capture, eruption gesture deep-copy).
 - **Combat** → dedupe table by `HittableId`, plus the two 1-frame inboxes (`HitConfirm`, `Recoil`).
 - **Terrain** → [`TerrainSnapshot`](World/TerrainSnapshot.cs): the dense tile grid is too large to copy, so it's rolled back via an inverse-delta journal ([`TerrainJournal`](World/TerrainJournal.cs)) — a snapshot stores `Mark`, restore replays entries past it in reverse. Sparse side-structures (sprout graph, per-cell HP, foam timers, impact accumulator) tick every frame so they're value-snapshotted instead. **Caveat:** journal marks are instance-relative, so terrain restore is same-instance only (the rollback case). [`DenseTerrainCapture`](World/DenseTerrainCapture.cs) provides a portable full-grid alternative for tooling/tests.
 
 ### Rollback netcode ([Net/](Net/))
 
-Built and running, not planned. [`RollbackSession`](Net/RollbackSession.cs) does predict → snapshot-ring → reconcile → replay with `InputFrameDelay = 3`, `StallSlack = 3`, `BufferLen = 60`, and piggybacked `Checksum()` desync detection. Around it: `InputRing`, `SnapshotRing`, `InputCodec`/`InputPacket`, `IRemoteInputSource`, `Net/Bot/BrawlerBotInputSource` (offline P2: utility brain over raw-`PlayerInput` maneuvers — `Plans/BOT_AI_PLAN.md`), `BotInputSource` (seeded-random stub), `NetSetup`. Transport is `MTile.Rtc` (WebRTC, manual copy/paste SDP signaling via `MTile.Desktop -- host|join`).
+Built and running, not planned. [`RollbackSession`](Net/RollbackSession.cs) does predict → snapshot-ring → reconcile → replay with `InputFrameDelay = 3`, `StallSlack = 3`, `BufferLen = 60`, and piggybacked `Checksum()` desync detection. Around it: `InputRing`, `SnapshotRing`, `InputCodec`/`InputPacket`, `IRemoteInputSource`, the offline P2 bots (`GameConfig.BotOpponent` picks one; `Net/Bot/BrawlerBotInputSource` is the code default — a utility brain over raw-`PlayerInput` maneuvers, `Plans/BOT_AI_PLAN.md`), `BotInputSource` (seeded-random stub, not used by `Game1`), `NetSetup`. Transport is `MTile.Rtc` (WebRTC, manual copy/paste SDP signaling via `MTile.Desktop -- host|join`).
 
 
 **Bot controller** ([`Net/Bot/Control/`](Net/Bot/Control/), design in [Plans/BOT_BEHAVIOR_ARCHITECTURE.md](Plans/BOT_BEHAVIOR_ARCHITECTURE.md)). The Bulldog family (`BulldogBot`, `HarrierBot`, `RangerBot`) runs on `BotController`: perception builds a `BotView`, then two parallel selectors pick the **Move** holder (reflex, else a committed action's Move claim, else the current stance) and the **Act** holder (an action or the Idle arm), and constraints (`SpikeGuardConstraint`) mask the final `PlayerInput`. A `BotBehaviour` has a category (stance / reflex / action / constraint), a `MoveClaim` (`None`, `Exclusive`, `Forbid(keys)`; `Forbid(all)` is hold-still) and a `Bet(view)` of `(dealt, taken, horizon)` in HP. Stances (`ChaseStance`, `StepOutStance`, Ranger's `HoldRangeStance`) return a target relative to the opponent; `MoveExecutor` turns it into keys (walk, stuck hop, air steer) and hands detours to `RoutePlanner`. `BetLedger` keeps additive per-(behaviour, `Situation` bucket) offsets that settle each bet toward realised HP; it is off for plain Bulldog and on for Ranger. `ControllerTrace` records occupancy, acquisitions, preemptions and oscillation counts, printed by `ZzzDuelistLeague` and `ZzzRangerEval` via `BotTraceReport`. `BotManeuver` remains the shared base and declares its own `Category`/`Move`. `BrawlerBotInputSource`, `CitadelBot`, `RiposteBot`, `RampartBot` and `CamperBot` still run the legacy `Poll`/`Locomote` loop (phase 2, BACKLOG 5.21).
 
-`Game1` takes an optional `NetSetup`; with one present it drives `_session.TryStep()` instead of stepping the sim directly, and `LocalPlayer` follows `_net.LocalPlayerIndex`. Offline-with-a-second-player uses `BotInputSource` to spoof P2. Stage save (Ctrl+M) and reload (F5) are gated off whenever a session exists.
+`Game1` takes an optional `NetSetup`; with one present it drives `_session.TryStep()` instead of stepping the sim directly, and `LocalPlayer` follows `_net.LocalPlayerIndex`. Offline-with-a-second-player polls the bot chosen by `GameConfig.BotOpponent` for P2's input (bots never run in a networked match, so none of their state is snapshotted). Stage save (Ctrl+M) and reload (F5) are gated off whenever a session exists.
 
 **`NetSetup` is the transport-agnostic seam** — just `LocalPlayerIndex`, an `Action<byte[]> Send`, and a `ConcurrentQueue` for delivery. This paid off: adding browser multiplayer required **zero changes under `Net/`** (verified — `git diff` over `Net/` across the entire browser-PvP effort is empty). Two transports now meet the sim at that seam:
 
 - **Desktop** — `MTile.Rtc/RtcConnection.cs`, driven by `MTile.Desktop -- host` / `-- join`.
-- **Browser** — `MTile.Web/wwwroot/mtileRtc.js`, a hand-written twin. `MTile.Web.csproj` explicitly *excludes* `MTile.Rtc/` from compilation, so these are parallel implementations, not shared code. They are wire-compatible (same blob format, same `"mtile"` channel, `{ordered:false, maxRetransmits:0}`, non-trickle ICE) — but **cross-play is forbidden anyway**, because float determinism doesn't hold across runtimes. Same build on both ends, always.
+- **Browser** — `MTile.Web/wwwroot/mtileRtc.js`, a hand-written twin. `MTile.Web.csproj` explicitly *excludes* `MTile.Rtc/` from compilation, so these are parallel implementations, not shared code. They are wire-compatible (same blob format, same `"mtile"` channel, `{ordered:false, maxRetransmits:0}`, non-trickle ICE) — but **cross-play is forbidden anyway**, because float determinism doesn't hold across runtimes. Same build on both ends, always. Only the browser lobby enforces it (its hello carries `LobbyHello.BuildId` and a mismatch fails the lobby); the desktop host has no version check.
 
 ### Browser PvP ([MTile.Web/](MTile.Web/))
 
@@ -107,9 +130,9 @@ Built and running, not planned. [`RollbackSession`](Net/RollbackSession.cs) does
 
 ### Determinism rules (when touching sim code)
 - **No sim-affecting mutable statics.** `HitId`s come from the per-`Simulation` [`HitIdAllocator`](World/HitIdAllocator.cs); block type is per-`PlayerCharacter` (driven by that player's own input), not global.
-- **All input arrives via `PlayerInput`** — no polling hardware mid-step. Block-picker (1-4 materials, 5 = Spike material) and planner toggle (P) are interpreted inside `PlayerCharacter.Update`.
-- **Same iteration order on restore.** Lists are rebuilt deterministically.
-- `MovementConfig` hot-reload is gated behind `GameConfig.HotReloadMovementConfig` (off for MP).
+- **All input arrives via `PlayerInput`** — no polling hardware mid-step. The block-picker (1-4 materials, 5 = Spike material) is interpreted inside `PlayerCharacter.Update`. (`PlayerInput.F/R/P` have no gameplay reader any more, but the netcode still carries and compares them.)
+- **Same iteration order on restore.** Lists are rebuilt deterministically (see the registration-order caveat under Snapshot / restore).
+- `MovementConfig` and reference-clip hot-reload are gated behind `GameConfig.HotReloadMovementConfig` (default on) **and** forced off whenever `Game1` has a `NetSetup`.
 
 Topology target is **same-build P2P** (desktop↔desktop or WASM↔WASM), so `float`/`MathF` determinism is a non-issue (same binary). See `Plans/ROLLBACK_ROADMAP.md`, `Plans/STATE_SNAPSHOT_PLAN.md`, `Plans/GGPO_PLAN.md`.
 
@@ -124,10 +147,10 @@ Pure kinematic data: `Position, Velocity, AppliedForce, Polygon, Constraints, Im
 
 ### `PhysicsWorld` ([Physics/PhysicsWorld.cs](Physics/PhysicsWorld.cs))
 Two integrators:
-- **`Step`** — discrete: move by `velocity * dt`, then iterate up to 8 times pushing the body out of overlapping shapes via MTV.
-- **`StepSwept`** — used by the main loop. Sweeps the body's displacement against all shapes via swept-SAT, picks earliest `T`, advances `(1-T)` along the residual displacement, loops up to 4 bounces. Plus a discrete pre-pass for any sprout that flipped solid mid-overlap.
+- **`Step`** — discrete: move by `velocity * dt`, then push the body out of overlapping shapes via MTV. **Dead code: nothing calls it, tests included.**
+- **`StepSwept`** — used by the main loop. Sweeps the body's displacement against all shapes via swept-SAT, picks earliest `T`, advances `(1-T)` along the residual displacement, loops up to 4 bounces. Plus a discrete depenetration pre-pass (up to 12 deepest-first push-outs) for any sprout that flipped solid mid-overlap.
 
-At every impulse site it computes `vnRel = (body.V - shape.V) · normal` and applies `body.V -= vnRel · normal` to zero relative normal velocity — **capped by how much impulse the impacted tile face can absorb** (excess carries through instead of being eaten, which is why `CrushImpulseThreshold` moved 400 → 700). The swept and discrete sites also call `TryApplyImpactDamage` — probes a 1px slab along the impact face via `WorldQuery.SolidShapesInRect`, splits `(impulse − threshold) · scale` damage among the pressed tiles. Friction (`SurfaceContact.Friction`) is Coulomb-ish: caps per-step tangential velocity change at `friction · dt`, gated off when the state pushed along the same tangent.
+At every impulse site it computes `vnRel = (body.V - shape.V) · normal` and applies `body.V -= vnRel · normal` to zero relative normal velocity — **capped by how much impulse the impacted tile face can absorb** (excess carries through instead of being eaten). Tile damage from an impact goes through `ImpactSpringField.Apply` (kinetic energy `½·Impact.Mass·ImpactMassScale·vn²` spent against the pressed cells; cells that break cushion the crush Δv). There is no `TryApplyImpactDamage`, and the `ImpactDamage` fields `ImpulseThreshold`/`DamagePerUnitImpulse`/`BreakThreshold`/`NormalRetainOnBreak` are never read. Friction (`SurfaceContact.Friction`) is Coulomb-ish: caps per-step tangential velocity change at `friction · dt`, gated off when the state pushed along the same tangent.
 
 ### Launches ([Physics/Launch.cs](Physics/Launch.cs))
 Bookkeeping over `Body.Velocity`, not a second velocity: a hit with `Hitbox.LaunchDecay > 0` (or a grab-throw release) records its Δv as `PhysicsBody.Launch`, and `LaunchSystem.StepSwept` — what every sim loop calls instead of `PhysicsWorld.StepSwept` — decays only that share before the sweep, reflects it on recorded bounces after, then clamps it to the real velocity along its direction (the fallback for every other case: wall stops, break-throughs, opposing input). Physics stays launch-agnostic: its only inputs are `ImpactMassScale` (fades with the launch, so a launched body breaks walls as if heavier) and its only outputs the per-step `PhysicsBody.ContactEvents` record. Bodies held in hitstop set `Frozen`, which pauses the launch. Decay rates live in `movement_config.json` (`WhipKickLaunchDecay`, `ThrowLaunchDecay`). Gates: `PhysicsLaunchTests`.
@@ -146,7 +169,7 @@ Provider-agnostic shape view: AABB + position + velocity + polygon. `ChunkMap` i
 ## World / Tiles ([World/](World/))
 
 ### `ChunkMap` ([World/ChunkMap.cs](World/ChunkMap.cs))
-Dictionary of `Point → Chunk`. Each chunk = 16×16 tiles; each tile = 16px (`Chunk.TileSize`). API surface:
+Dictionary of `Point → Chunk`. Each chunk = 16×16 tiles (`Chunk.Size`); each tile = 11px (`Chunk.TileSize`, was 16). API surface:
 - **Cell state** — `GetCellState` returns `Empty | Sprouting | Solid`; `GetCellType` returns `Stone | Dirt | Sand | Foam`.
 - **Sprouts** — `TryRequestTile(gtx, gty, type)` builds a Growing or Pending `TileSproutNode` in `Graph`.
 - **Damage** — `DamageCell` → `TileDamage.ApplyDamage` accumulates per-cell HP; on threshold the cell breaks. `BreakCell` flips to Empty and fires `OnTileBroken(center, type)`.
@@ -186,7 +209,7 @@ namespace edit, and both compile globs (`MTile.Core`, and `MTile.Web`'s `..\**\*
 | [`Input/`](Character/Input/) | Raw hardware → intent: `Controller` (+`PlayerInput`), `InputParser`, `IntentBuffer`, `InputIntent`, `SmoothPen`. |
 | [`Movement/`](Character/Movement/) | The movement FSM (`Movement`, the six `*States.cs` families, `MovementPriorities`) plus its plumbing (`MovementConfig`, `MovementVars`, `MovementModifiers`, `MovementCapability`, `AirControl`, `JumpServo`). |
 | [`Action/`](Character/Action/) | The action/combat FSM: `ActionStates` (+`ActionVars`), `CombatState`, `ConditionState`, `PlayerAbilityState`, `BuildMeters`, `IHittable`. |
-| [`Corrector/`](Character/Corrector/) | The ballistic corrector stack — `AmbientCorrector`, `CorrectionSolver`, `BallisticPredictor`, the `Corrector*` support types, the path tracker (`PathTracker` + its policies `GripPathPolicy` / `SlidePathPolicy`), and the geometry/path helpers (`CObstacle`, `CorridorProbe`, `ClearanceConstraints`, `ReferencePath` — clip retargeting + `ReferenceClipRegistry`, `GuidedPath`, `HermiteClip`, `LatticePlanner`). |
+| [`Corrector/`](Character/Corrector/) | The ballistic corrector stack — `AmbientCorrector`, `CorrectionSolver`, `BallisticPredictor`, the `Corrector*` support types, the path tracker (`PathTracker` + its policies `GripPathPolicy` / `SlidePathPolicy`), and the geometry/path helpers (`CObstacle`, `CorridorProbe`, `ClearanceConstraints`, `ReferencePath` — clip retargeting + `ReferenceClipRegistry`, `HermiteClip`). `GuidedPath` is unreferenced and `LatticePlanner` is a prototype used only by Game1's freeze-frame view; the live planner is `LatticePathPlanner`. See [Character/Corrector/MAP.md](Character/Corrector/MAP.md). |
 | [`Sensing/`](Character/Sensing/) | `EnvironmentContext` and the five terrain checkers it caches (`Ground`/`Ceiling`/`Wall`/`ExposedUpperCorner`/`ExposedLowerCorner`). |
 
 ### `PlayerCharacter` ([Character/PlayerCharacter.cs](Character/PlayerCharacter.cs))
@@ -202,11 +225,11 @@ Owns two parallel FSMs (movement + action), the ability state, intent buffer, an
 
 Each `Update`:
 1. `_frame++`; tick invuln; apply crush damage.
-2. Interpret this player's own block-picker (1-4) + planner-toggle (P) input → `_activeBlockType` / `_eruptionMode`.
+2. Interpret this player's own block-picker (1-4, 5 = Spike) input → `_activeBlockType`.
 3. Tick `ConditionState` (combo windows) + `CombatState` (hitstun/stun) flags.
 4. `InputParser.Detect` enqueues gesture intents.
 5. Build a fresh `EnvironmentContext` (input + buffers + chunks + spawner + HitIds + condition/combat + frame + dt + `Modifiers = Identity`).
-6. Movement FSM: if current state's `CheckConditions` fails → exit + fall back to Falling. Then scan registry for higher-passive-priority candidates passing `CheckPreConditions`; transition if one beats current's `ActivePriority`. Two further gates apply: a candidate's `RequiredCapabilities` must not intersect `CombatState.BlockedCapabilities`, and last frame's state holds a one-frame veto via `owner.Suppresses(state, ctx)`.
+6. Movement FSM: if current state's `CheckConditions` fails → exit + fall back to Falling. Then scan registry for the highest-`PassivePriority` candidate passing `CheckPreConditions` (first registered wins a tie); transition only if its Passive is strictly greater than the current state's `ActivePriority`. Two further gates apply: a candidate's `RequiredCapabilities` must not intersect `CombatState.BlockedCapabilities`, and last frame's state holds a one-frame veto via `owner.Suppresses(state, ctx)`.
 7. **Action FSM selection runs *before* `MovementState.Update`** so the newly-selected action's `ApplyMovementModifiers` is in effect when movement reads physics knobs.
 8. `MovementState.Update` writes `Body.AppliedForce`; `ActionState.ApplyActionForces` augments it; gravity-scale modifier applied as counter-force.
 9. `ActionState.Update` does its FSM work (publishing hitboxes, advancing timers).
@@ -232,7 +255,7 @@ Each `Update`:
 > against exact per-tile C-space geometry (`CObstacle`,
 > `ClearanceConstraintBuilder`), solved over the channel stack
 > (`CorrectorChannels.BuildFold`: LegServo/Drive/Redirect/Tuck/ContactPush,
-> with `LatticeTracker`'s mask overrides). Hover, walking, landing catch,
+> with `LatticeTracker` rewriting the forward slot's axis, cap, lever and weight — masks come only from `BuildFold`). Hover, walking, landing catch,
 > 1-high climbs and ducks are solver output. A state that passes
 > `FoldProfile.None` owns its own forces and gets nothing from the ambient
 > layer. The `qp`, `ref` and `lm` fold engines, `AmbientPolicy` and the
@@ -253,9 +276,9 @@ Each `Update`:
 > `ManeuverCorrector` probe) use the grip (`BuildGrip`: lift / pull / hold /
 > brace on the corner); `Dropdown` the feet (`BuildSlide`). The ground and
 > running jumps are the jump channel (Plans/MOVEMENT_RESOURCE_MODEL.md §11:
-> a solver push created by the press, live while held); the double, wall,
-> ledge and covered jumps stay velocity writes with the tracker riding a
-> jump profile. Channel masks are the resource layer's (`MovementResource`:
+> a solver push created by the press, live while held); the double and wall
+> jumps stay velocity writes with the tracker riding a jump profile; the
+> covered and ledge jumps run with no fold profile. Channel masks are the resource layer's (`MovementResource`:
 > probes on `EnvironmentContext` ∧ the state's `Uses`).
 > `TerrainCarried` runs with the corrector off.
 
@@ -264,24 +287,24 @@ Each `Update`:
 **Launch states**: `JumpingState`, `RunningJumpState`, `DoubleJumpingState`, `WallJumpingState(dir)`, `CoveredJumpState` (under low overhangs) — set vY once, hold while button held. Actives 50–60, but **passives are only 30–48** (they're trigger-driven, not assertive).
 **Guided traversals**: the corrector climb family above at **29/29** — trigger-by-feasibility, a maneuver fires iff its corrected arc provably delivers. 29 deliberately sits *below* every launch's passive (Jump 30 … CoveredJump 48) so a player's own jump input always wins the same-frame race at a lip, while still outbidding every free state and the stun band. (The old 46/46 was a genuine bug: preemption compares candidate Passive to current Active, so climbs were in fact unbeatable.) Holds are 42–44 (`LedgeGrabState`/`LedgePullState`, wall corners via `FloatingSurfaceDistance` + ability flags), `LedgeJumpState` is 55/44, and `DropdownState` (Down+platform-drop) sits at 20/20 in the free band.
 
-`MovementState` lifecycle methods take `ref MovementVars`; `ResetTransient()` nulls any soft-contact ref cache after a restore so the idempotent `Ensure…` rebuilds it next frame. Cross-frame corrector state (Δu anchors, elective latch) lives in `MovementVars` — snapshot-covered.
+`MovementState` lifecycle methods take `ref MovementVars`; `ResetTransient()` re-takes the state's soft contact from the restored body by Owner tag (contacts are snapshotted with the body). Cross-frame corrector state lives in `MovementVars` — snapshot-covered; the Δu anchors there are written but no longer read (`PathTracker` zeroes `PrevApplied`/`DeltaWeight`).
 
 ### Action FSM ([Character/Action/ActionStates.cs](Character/Action/ActionStates.cs))
 
 Same FSM shape, separate registry/history, lifecycle takes `ref ActionVars`. Each action overrides `ApplyMovementModifiers(ref MovementModifiers, in ActionVars)` (declarative multiplicative scalars) and `ApplyActionForces(ctx, in ActionVars)` (direct `AppliedForce` writes). Registered actions (Active/Passive priority):
 
-- `NullAction` (0/0) fallback; `ReadyAction` (10/15) LMB wind-up; `RecoveryAction` (40/45) post-attack lockout gating combos.
+- `NullAction` (0/0) fallback; `RecoveryAction` (Active 10, Passive set per frame from its bid) post-attack lockout gating combos. There is no `ReadyAction`. The full per-class index with priorities is [Character/Action/MAP.md](Character/Action/MAP.md).
 - **Slashes** — `SlashLikeAction` base parametrizes arc shape + damage window. `GroundSlash1/2/3` (combo via `Slash2Ready`/`Slash3Ready`), `CrouchSlash` (crouch-only), `AirSlash1/2`, `AirTurnSlash` (air backward-click turnaround), `GuardRetaliateAction` (counter after a charged parry).
 - `StabAction` (30/30) — long thrust with air-stab dive boost; `AirWhipKick` (air backward-swipe: flips facing, thin fast long kick, ±25° aim).
 - `PulseAction` (30/30) — Circle gesture; 12-segment expanding knockback ring that carries the caster's momentum.
 - **Guard** — `GuardAction` (35/40, Shift held + no L/R) sets `GuardActive`; a weak in-cone hit parries to zero and arms `GuardCharged`, enabling `GuardRetaliateAction`.
-- **Grab / throw** — `GrabAction` (46/46) publishes a hold force field; `GrabbedSlash` (36/36) is the victim's exempt struggle attack, which erodes `GrabStrength` rather than dealing knockback. Throws stun the victim into Tumble.
-- **Ranged** — `EnergyBallAction` (Shift+LMB tap), `BeamAction` (Shift+LMB hold → sustained beam after charge), `GrenadeAction` (F → sticky grenade). These spawn projectile entities via `ctx.Spawner`. `LobbedAreaAction` (Shift+RMB charge → ranged eruption) still exists but is **deactivated** — its binding became Grab.
+- **Grab / throw** — `GrabAction` (48/48) publishes a hold force field; `GrabbedSlash` (30/36) is the victim's exempt struggle attack, which erodes `GrabStrength` rather than dealing knockback. Throws stun the victim into Tumble.
+- **Ranged** — the player's `EnergyBallAction`, `BeamAction` and `GrenadeAction` are removed. `LobbedAreaAction` still exists as a class but is **not in the player's action registry** (a few bot files name it); it still needs its clip because `ClipBindingTests` enumerates every concrete `ActionState`.
 - **Terrain building** — see the section below. `BlockPaintAction` (8/10, plain RMB), `BlockPlaceAction` (8/10, Shift+RMB), `BlockGrabAction` (46/46, Shift+LMB into solid). `GrabAction` moved to 48/48 so grabbing a *player* outranks grabbing *terrain*.
 
 ### Combat condition state
-[`ConditionState`](Character/Action/ConditionState.cs) — *offensive* combo/recovery/guard-window flags, each with an expire frame; `Tick` closes windows.
-[`CombatState`](Character/Action/CombatState.cs) — *defensive*: `Hitstun` (every hit briefly locks Jump, with diminishing extensions so stun-locks can't grow unbounded), `Stun` (heavy hits, gates attacks too), and Guard (`GuardActive`/`GuardCharged` + `TryParry`). Exposes `BlocksJump`/`BlocksAttack` gates.
+[`ConditionState`](Character/Action/ConditionState.cs) — *offensive* combo/recovery flags, each with an expire frame; `Tick` closes windows.
+[`CombatState`](Character/Action/CombatState.cs) — *defensive*: `Hitstun` (with diminishing extensions so stun-locks can't grow unbounded; it blocks WallCling and LedgeGrab but **not** Jump or Dash), `Stun` (declared per hitbox via `StunSeconds`, never inferred from knockback; stun or a grab also blocks Jump), `Launched`, and Guard (`ResolveGuard`). `BlockedCapabilities` is the movement gate; `BlocksAttack` is grabbed-only.
 
 ### Terrain building — paint, place, burst, peel
 
@@ -346,13 +369,13 @@ are organisational only — moving a file between them needs no other change.
 
 ## Drawing ([Drawing/](Drawing/))
 
-[`DrawContext`](Drawing/DrawContext.cs) wraps `SpriteBatch` + 1×1 pixel and is **the** immediate primitive API — `Line/Box/Rect/RotatedRect/Ring/Disc`; nothing else does `SpriteBatch.Draw(pixel, …)` transform math by hand. [`Sprite`](Drawing/Sprite.cs) is a `Pose`-based vector sprite; `AnimatedSprite` adds frame timing. [`ParticleSystem`](Drawing/ParticleSystem.cs) is a fixed-capacity pool (2048 in Game1). [`Trail`](Drawing/Trail.cs) is a fading ribbon (cursor trail + slash tip trails); it can `Draw` immediately or `Emit` into a telegraph list. [`Effects`](Drawing/Effects.cs) — preset spawners (`TileBreak`, `Puff`). **All drawing is cosmetic and downstream of the sim.**
+[`DrawContext`](Drawing/DrawContext.cs) wraps `SpriteBatch` + 1×1 pixel and is **the** immediate primitive API — `Line/Box/Rect/RotatedRect/Ring/Disc`; nothing else does rotated/transform math by hand (several renderers and HUDs still draw axis-aligned pixel rectangles straight through `SpriteBatch`). [`Sprite`](Drawing/Sprite.cs) is a `Pose`-based vector sprite; `AnimatedSprite` adds frame timing. [`ParticleSystem`](Drawing/ParticleSystem.cs) is a fixed-capacity pool (2048 in Game1). [`Trail`](Drawing/Trail.cs) is a fading ribbon (cursor trail + slash tip trails); it can `Draw` immediately or `Emit` into a telegraph list. [`Effects`](Drawing/Effects.cs) — preset spawners (`TileBreak`, `Puff`). **All drawing is cosmetic and downstream of the sim.**
 
 **Sim-side code never draws.** Player actions (`ActionState.Telegraph`), enemy FSM states (`EnemyState<TVars>.Telegraph`), and entities that implement `ITelegraphSource` *declare* their world-space overlay shapes — charge dots, pulse rings, wind-up tells, the block-grab tether tint — by appending to the frame's [`TelegraphList`](Presentation/TelegraphList.cs), a graphics-free shape buffer. `Game1.Draw` clears it, collects from the players' current actions then the entities, and [`TelegraphRenderer`](Drawing/TelegraphRenderer.cs) draws it through `DrawContext` in the world pass. Emission order is draw order. Because the list has no `Microsoft.Xna.Framework.Graphics` dependency, an action's visual is unit-testable headless (`MTile.Tests/Presentation/TelegraphListTests.cs`). Adding a telegraph to a new action or enemy means overriding `Telegraph` and calling `t.Rect/Box/Line/Ray/Ring` — never reaching for a `SpriteBatch`.
 
 The stack has grown well past that base layer:
 
-- **Character rendering** — `SkeletonMetaballRenderer` + `DensityField` + `PrimitiveBatch` drive a RenderTarget density-field pipeline with segment-metaball shaders (`Content/CapsuleSplat.fx`, `Content/MetaballComposite.fx`) for blobby bone rendering.
+- **Character rendering** — characters are drawn by `SpriteSkin` from the animator's pose (or the debug stick figure via `SkeletonRenderer`). `SkeletonMetaballRenderer` + `DensityField` + `PrimitiveBatch` (the segment-metaball shaders `Content/CapsuleSplat.fx`, `Content/MetaballComposite.fx`) now run only as dev previews behind the `DebugDraw*Demo` flags.
 - **Sprite skin** — [`SpriteSkin`](Drawing/SpriteSkin.cs) + [`SpriteBinding`](Drawing/SpriteBinding.cs) + [`MlsDeformer`](Drawing/MlsDeformer.cs): hand-drawn multi-layer PNG artwork MLS-deformed over the rig, per-player bindings (see `SpriteBindings/`, art in `SkeletonAssets/`).
 - **Glow / VFX** — `GlowRenderer`, `GlowTrailField`, `AttackGlowSystem`.
 - **World & UI** — `ChunkRenderer`, `TilePalette`/`TileTextureAtlas`, `ParallaxBackground`, `HudRenderer`, `DebugOverlayRenderer`, `DevDemoRenderer`, `ScreenshotSystem`.
@@ -362,15 +385,15 @@ The stack has grown well past that base layer:
 
 Render-only, and hot-reloadable freely for that reason. The rig is a pure joint chain (`Drawing/Skeleton.cs`, rigs in `Skeletons/*.json`, clips in `SkeletonStates/<rig>/`, loaded by `SkeletonStore`).
 
-[`CharacterAnimator`](Animation/CharacterAnimator.cs) is the hub (plus `.Constraints` and `.Diagnostics` partials): it selects and blends clips (`AnimationSampler`, `AnimAdditionSampler`, `OverlayStack`, `BoneMask`, `SkeletonComposition`) and then runs a **generalized box-bounded Levenberg–Marquardt least-squares solve** ([`LeastSquaresSolver`](Animation/LeastSquaresSolver.cs)) over clip times, CoM offset, and joint corrections. Constraints are a composable `IConstraint` library — `FixedPoint`/`ExternalPin` (foot plant, climb hand grip), half-plane `NoPenetration` against `TerrainSurfaces`, and `ActionAimConstraint` (re-aims the stab overlay along the runtime input direction). `PoseIk` and `MoveDriver` sit alongside; tuning lives in `configs/anim_solver_config.json`.
+[`CharacterAnimator`](Animation/CharacterAnimator.cs) is the hub (plus `.Diagnostics` and `.Baseline` partials; the constraints live in `SolveConstraints.cs`): it selects and blends clips (`AnimationSampler`, `AnimAdditionSampler`, `OverlayStack`, `BoneMask`, `SkeletonComposition`) and then runs a **generalized box-bounded Levenberg–Marquardt least-squares solve** ([`LeastSquaresSolver`](Animation/LeastSquaresSolver.cs)) over CoM offset and joint corrections (the clip-time variable is box-locked to zero in both solves). Constraints are a composable `ISolveConstraint` library — `PlantedContactsConstraint` (foot plants), `FixedPoint`/`ExternalPin` (e.g. climb hand grip), half-plane `NoPenetration` against `TerrainSurfaces`, and `ActionAimConstraint` (re-aims the stab overlay along the runtime input direction). `MoveDriver` sits alongside (`PoseIk` is authoring-only: Probe, Demo, `ClipSceneBake`); tuning lives in `configs/anim_solver_config.json`.
 
 ### Clip binding
 
-Clips are selected by the JSON **`Type`** field — never the filename or `Name` (`climbhands.json` plays as the `ClimbHands` overlay). Movement goes `MovementState.AnimationTag → AnimTag → IMoveDriver → AnimClip → clip`, where tag→clip is a hardcoded table ([MoveDriver.cs:89-106](Animation/MoveDriver.cs#L89-L106)) and *not* name matching; actions bind by exact ordinal match of the ActionState **class name** to `Type`. **[Plans/ANIMATION_BINDING_MAP.md](Plans/ANIMATION_BINDING_MAP.md) is the full state→clip→arc table** — read it before renaming anything, and note that the old `Vault` naming overload was retired 2026-08-04 (there is no `VaultState`; the clip is `parkour.json`).
+Clips are selected by the JSON **`Type`** field — never the filename or `Name` (`climbhands.json` plays as the `ClimbHands` overlay). Movement goes `MovementState.AnimationTag → AnimTag → IMoveDriver → AnimClip → clip`, where tag→clip is a hardcoded table ([MoveDriver.cs:192-217](Animation/MoveDriver.cs#L192-L217)) and *not* name matching; actions bind by exact ordinal match of the ActionState **class name** to `Type`. **[Plans/ANIMATION_BINDING_MAP.md](Plans/ANIMATION_BINDING_MAP.md) is the full state→clip→arc table** — read it before renaming anything, and note that the old `Vault` naming overload was retired 2026-08-04 (there is no `VaultState`; the clip is `parkour.json`).
 
 [`MotionProbe`](Animation/MotionProbe.cs) converts joint angles to world positions — **use it rather than eyeballing angles** when debugging clips (this is what the `anim-probe` skill and `MTile.Probe` drive).
 
-**Clip binding is by the JSON `Type` field, not the filename** — `Type` either parses as an `AnimClip` enum member (movement clip) or matches an `ActionState` class name exactly (upper-body overlay). There is no compile-time link, so [ClipBindingTests.cs](MTile.Tests/Animation/ClipBindingTests.cs) enforces it in both directions: every `AnimClip` member needs a file **in every rig** (a missing one throws the first frame a driver selects it), every concrete `ActionState` needs a matching clip (a missing one *silently* drops the overlay), and every action-typed clip needs a class. It also enforces the pacing contract: an action must either override `AnimationProgress` or bind a looping clip. [Plans/ANIMATION_BINDING_MAP.md](Plans/ANIMATION_BINDING_MAP.md) is the authoritative map of all three namespaces.
+**Clip binding is by the JSON `Type` field, not the filename** — `Type` either parses as an `AnimClip` enum member (movement clip) or matches an `ActionState` class name exactly (upper-body overlay). There is no compile-time link, so [ClipBindingTests.cs](MTile.Tests/Animation/ClipBindingTests.cs) enforces it in both directions: every `AnimClip` member needs a file **in every rig** (a missing one throws the first frame a driver selects it), every concrete `ActionState` needs a matching clip (a missing one *silently* drops the overlay; the test's `NoOverlay` set exempts a few actions), and every action-typed clip needs a class. It also enforces the pacing contract: an action must either override `AnimationProgress` or bind a looping clip. [Plans/ANIMATION_BINDING_MAP.md](Plans/ANIMATION_BINDING_MAP.md) is the authoritative map of all three namespaces.
 
 **Action/movement progress** are two mirrored render-only channels: `ActionState.AnimationProgress` (default `-1f` = decline, requires a looping clip) and `MovementState.AnimationProgress`. Both land in `CharacterAnimSample`; the animator remaps the overlay clip onto `ActionProgress`, and `ClipTimeMode.Progress` maps onto `MovementProgress`.
 
@@ -384,17 +407,17 @@ Clips are selected by the JSON **`Type`** field — never the filename or `Name`
 
 `Initialize`: load `GameConfig`, resolve the `Stage`, load `MovementConfig` (+ desktop hot-reload watcher), construct `Simulation`, subscribe `OnPlayerRespawn`/`OnTileBroken` to cosmetic particle spawners.
 
-`Update`: read keyboard/mouse, compute `mouseWorldPos` from the camera, `Controller.Poll` → `_sim.Step(input)` (or `_session.TryStep()` when a `NetSetup` is present). Then **cosmetic-only**: cursor trail, sync sprites to bodies + advance animations, air→ground landing puff, particles, camera tracking. None of this writes sim state.
+`Update`: read keyboard/mouse, compute `mouseWorldPos` from the camera, `Controller.Poll` → `_sim.Step(input)` (offline with a bot: `_sim.Step(input, _botInput.Poll(...))`; with a `NetSetup`: `_session.TryStep()`). Then **cosmetic-only**: cursor trail, sync sprites to bodies + advance animations, air→ground landing puff, particles, camera tracking. None of this writes sim state.
 
-Also in the shell: a `TimeScale` slow-mo accumulator, a freeze-frame corrector inspector driven by `Testing/freeze.json`, Ctrl+M stage save / F5 reload via `StageSaver.cs` (both disabled under a rollback session), and a worst-of-60-frames timing probe. **`Game1` is not actually thin** — ~870 lines, mostly render and HUD; `Plans/GAME1_REFACTOR_PLAN.md` tracks the remaining extraction.
+Also in the shell: a `TimeScale` slow-mo accumulator, a freeze-frame corrector inspector driven by `Testing/freeze.json`, Ctrl+M stage save / F5 reload via `StageSaver.cs` (both disabled under a rollback session), and a worst-of-60-frames timing probe. **`Game1` is not actually thin** — ~1,660 lines, mostly render and HUD; `Plans/GAME1_REFACTOR_PLAN.md` tracks the remaining extraction.
 
-`Draw`: backdrop → world batch: chunks (damage-darkened) → entities' sprites → player sprites → (batch split) sprite skins → debug skeleton/bodies → particles/cursor trail → **telegraph pass** (the players' `CurrentAction.Telegraph` + every `ITelegraphSource` entity into one `TelegraphList`, drawn by `TelegraphRenderer`) → debug overlays (hitboxes, hurtboxes, orientation, constraints, corrector/lattice trajectories, health bars, gated by `GameConfig` toggles) → batch `End` → dev demos → glow pass (`AttackGlowSystem`, own `PrimitiveBatch` pass) → screen-space HUD passes → screenshot capture.
+`Draw`: backdrop → world batch: chunks (damage-darkened) → entities' sprites → player sprites → (batch split) sprite skins → debug skeleton/bodies → particles/cursor trail → **telegraph pass** (the players' `CurrentAction.Telegraph` + every `ITelegraphSource` entity into one `TelegraphList`, drawn by `TelegraphRenderer`) → debug overlays (hitboxes, hurtboxes, orientation, constraints, corrector/lattice trajectories, health bars, gated by `GameConfig` toggles) → batch `End` → dev demos → glow pass (`AttackGlowSystem`; the primary player's goes through the `GlowTrailField` render-target pipeline when that flag is on) plus sprite attachments and VFX → screen-space HUD passes → screenshot capture. The exact 15-step order with line anchors and gating flags is in [Drawing/MAP.md](Drawing/MAP.md).
 
 ## Tests ([MTile.Tests/](MTile.Tests/))
 
 xUnit. Categories:
 - `PhysicsTests`, `GroundFrictionTests`, `MovingPlatformTests`, `JumpingStateTests` — physics/movement units.
-- `Sim/` — scenario-driven simulation tests with deterministic ascii-terrain + scripted input (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport` CSV diffing). `SimRunner.Run` mirrors `Simulation.Step`'s phase order; `SimRunner.RunMulti` runs multiple players sharing terrain + combat registries for cross-player combat tests.
+- `Sim/` — scenario-driven simulation tests with deterministic ascii-terrain + scripted input (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport` CSV diffing). `SimRunner` follows `Simulation.Step`'s phase order but is a **partial** mirror: `Run` has no hurtboxes, entities or combat, and `RunMulti` (multiple players sharing terrain + combat registries) leaves out terrain streaming, stage tickers, `Impact.Tick`, respawn, spikes, crystals and charged blasts. For the whole loop, drive a real `Simulation`.
 - `SnapshotRoundTripTests` — the rollback gate: snapshot at frame K, run to N, restore K, re-run to N, assert identical traces (incl. terrain — a ball chipping the floor and a foam build straddling the snapshot both replay bit-for-bit). Alongside it: `RollbackHarnessTests`, `InputCodecTests`, `RtcConnectionTests`, `TwoPlayerStepTests`.
 - `Animation/` — ~25 files covering the solver (`AnimSolverTests`, `FixedPointSolverTests`, `NoPenetrationSolverTests`, `ParkourGripSolverTests`, `ActionAimSolverTests`), blending/overlays, rig/IK, and sprite skin. Files prefixed `Zzz` are slow soak tests, named to run last.
 
@@ -404,7 +427,7 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 
 ## Key conventions
 
-- **Right-handed coords with Y-down** (MonoGame default). World gravity `(0, 600)` px/s² (`Simulation.Gravity`). Tile coords `gtx, gty` are integer global cell indices; cell centers are `gtx * Chunk.TileSize + Chunk.TileSize/2` (nominally 16px tiles — the codebase is parameterized on `Chunk.TileSize`, but px overrides in `configs/movement_config.json` do NOT scale with it).
+- **Right-handed coords with Y-down** (MonoGame default). World gravity `(0, 600)` px/s² (`Simulation.Gravity`). Tile coords `gtx, gty` are integer global cell indices; cell centers are `gtx * Chunk.TileSize + Chunk.TileSize/2` (11px tiles — the codebase is parameterized on `Chunk.TileSize`, but px overrides in `configs/movement_config.json` do NOT scale with it).
 - **Forces are accelerations**: `PhysicsBody` has no mass; `body.Velocity += body.AppliedForce * dt`. Mass appears only in `ImpactDamage` and `Entity`/player knockback.
 - **Modifier scalars are multiplicative on baseline config**, not absolute (`m.MaxWalkSpeed *= 0.6f`).
 - **Priorities form bands** — see [MovementPriorities.cs](Character/Movement/MovementPriorities.cs) for the authoritative numbers. Roughly: free/ground 0–20, stun 25, Tumble 51/26, climb family 29/29, jump passives 30–48, holds 42–44, launch actives 50–60. Preemption compares the **candidate's Passive** to the **current state's Active** — get that backwards and bands look right while behaving wrong.
@@ -419,7 +442,7 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 |---|---|
 | Add a new player ability | New `ActionState` subclass; add to `_actionRegistry` in [PlayerCharacter.cs](Character/PlayerCharacter.cs); put per-activation fields in `ActionVars`; pick priorities in the right band |
 | Add a new movement state | Subclass `MovementState`, add to `_stateRegistry`, put per-activation fields in `MovementVars`, null any soft-contact cache in `ResetTransient`; **add its priorities to [MovementPriorities.cs](Character/Movement/MovementPriorities.cs)** and reason about Passive-vs-current-Active, not band membership |
-| Add a new enemy | Prefer an [`EnemyBlueprint`](Entities/Enemies/EnemyBlueprint.cs) + `EntityKind` — no subclass. `BruteEnemy` is the hand-written reference if you need one |
+| Add a new enemy | Prefer an [`EnemyBlueprint`](Entities/Enemies/EnemyBlueprint.cs) + `EntityKind` — no subclass. A hand-written subclass also needs its `SubclassEnemy` line in `EntityFactory`. Step-by-step recipes for each path: [Entities/MAP.md](Entities/MAP.md) |
 | Add a new projectile | Subclass `Projectile`, add an `EntityKind` + `Rehydrate` case + `WriteState`/`ReadState`; spawn via `Stage.Populate` or `ctx.Spawner` |
 | Tune how a hit *feels* | Percent contribution is the hitbox's `Damage`; knockback shape is `HitResolver` + `configs/impact_profiles.json`; HP loss is the crush path (`CrushImpulseThreshold`) |
 | Author or debug an animation clip | `MTile.Probe` CLI (`list/new/addkey/ik/contact/rot/retime/…`) against `SkeletonStates/<rig>/`; read geometry with `MotionProbe`, never by eyeballing angles |
@@ -434,4 +457,4 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 | Tune building / eruption | [BuildMeters.cs](Character/Action/BuildMeters.cs) for the economy, [TileMassField.cs](World/TileMassField.cs) for spill/decay, `BuildCost` in `configs/material_strengths.json` for per-material cost |
 | Tune the block peel / throw | `Peel*` and `Grab*` knobs in `configs/movement_config.json` (hot-reload); mechanics in [PullPointEntity.cs](Entities/PullPointEntity.cs) + the Tracking phase of [LobbedAreaProjectile.cs](Entities/Projectiles/LobbedAreaProjectile.cs); `MovementConfig.BlockPeelEnabled` toggles legacy drag-rip |
 | Add an `ActionState` | You **must** author a clip whose `Type` equals the class name, or `ClipBindingTests` fails; an action that declines `AnimationProgress` needs a *looping* clip |
-| Tune impact / crush damage | `ImpactDamage` in [EntityFactory.cs](Entities/EntityFactory.cs) / [PlayerCharacter.cs](Character/PlayerCharacter.cs) |
+| Tune impact / crush damage | `configs/impact_profiles.json` + `ImpactSpringField` ([Physics/](Physics/)); the player's crush path and `CrushImpulseThreshold` in [PlayerCharacter.cs](Character/PlayerCharacter.cs) |
