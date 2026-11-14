@@ -152,6 +152,10 @@ public struct EntityData
     public float   StateTime;
     public int     Facing;
     public Vector2 Aim;
+    // EnemyMovementVars.SavedGravityScale: the GravityScale a movement state (cling)
+    // took off the entity on Enter and owes back on Exit. Snapshotted because a
+    // restore mid-state otherwise hands Exit a zero, and the enemy stays weightless.
+    public float   SavedGravityScale;
 
     // EnemyEntity action-FSM (ActionIdx == -1 ⇒ no action active).
     public int   ActionIdx;

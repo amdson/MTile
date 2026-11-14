@@ -236,10 +236,10 @@ public class EnemyJumpState : EnemyMovementState
 //      to move up while standing on flat ground).
 //
 // Enter/Exit toggle the entity's GravityScale; the original value is saved
-// into EnemyMovementVars so Exit restores it. Snapshot round-trip handles
-// gravity correctly because Entity.WriteState/ReadState already capture
-// GravityScale — a snapshot taken mid-cling restores a 0 scale alongside
-// the state index.
+// into EnemyMovementVars so Exit restores it. Both halves ride the snapshot:
+// Entity.WriteState/ReadState capture the live GravityScale (0 mid-cling) and
+// EnemyEntity marshals the saved value through EntityData.SavedGravityScale,
+// so an Exit after a mid-cling restore still puts the original scale back.
 //
 // Not in the priority pyramid by default — enemies opt into clinging by
 // adding this state to their movement list (analogous to how only some
@@ -295,9 +295,9 @@ public class EnemyClingMoveState : EnemyMovementState
 
     public override void Enter(in EnemyContext ctx, ref EnemyMovementVars v)
     {
-        // Save and zero gravity. Saved in vars (not on the flyweight) so a
-        // snapshot taken mid-state restores the right value on Exit, and so
-        // two entities sharing this state instance don't clobber each other.
+        // Save and zero gravity. Saved in vars (not on the state object) so it
+        // is snapshotted with the entity (EntityData.SavedGravityScale) and a
+        // restore mid-state still hands Exit the right value.
         v.SavedGravityScale  = ctx.Self.GravityScale;
         ctx.Self.GravityScale = 0f;
         // Cancel any residual fall velocity so the first frame's anchor-search

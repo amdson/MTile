@@ -75,7 +75,8 @@ public struct EnemyMovementVars
     // Saved off by states that mutate Entity-level physics knobs on Enter and
     // must restore them on Exit (e.g. EnemyClingMoveState toggles GravityScale).
     // Reset to 0 with the rest of the vars on transition, which is correct
-    // because Enter is the first thing that reads/writes it.
+    // because Enter is the first thing that reads/writes it. Snapshotted through
+    // EntityData.SavedGravityScale (EnemyEntity.WriteState/ReadState).
     public float SavedGravityScale;
 }
 

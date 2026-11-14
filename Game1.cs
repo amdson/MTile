@@ -318,9 +318,9 @@ public class Game1 : Game
             string movementCfgPath = Path.GetFullPath("configs/movement_config.json");
             MovementConfig.Load(movementCfgPath);
 
-            // Hot-reload is a desktop dev convenience only. It mutates a sim-affecting
-            // static at an arbitrary moment, so it's gated off for multiplayer.
-            if (_config.HotReloadMovementConfig)
+            // Hot-reload is a desktop dev convenience only. It mutates a sim-affecting static at an
+            // arbitrary moment, so it is off in a networked match (_net != null) whatever the config says.
+            if (_config.HotReloadMovementConfig && _net == null)
             {
                 _movementConfigWatcher = new FileSystemWatcher(Path.GetDirectoryName(movementCfgPath))
                 {
@@ -341,7 +341,7 @@ public class Game1 : Game
             // the game loads; fall back to the title-relative bin copies.
             string refClipDir = Path.GetFullPath("ReferenceClips");
             ReferenceClipRegistry.LoadOverrides(Directory.Exists(refClipDir) ? refClipDir : "ReferenceClips");
-            if (_config.HotReloadMovementConfig && Directory.Exists(refClipDir))
+            if (_config.HotReloadMovementConfig && _net == null && Directory.Exists(refClipDir))
             {
                 _refClipWatcher = new FileSystemWatcher(refClipDir)
                 {

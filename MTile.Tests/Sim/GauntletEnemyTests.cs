@@ -322,6 +322,44 @@ public class GauntletEnemyTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Latcher_RestoredMidCling_GetsItsGravityBackWhenItLetsGo()
+    {
+        // The cling state zeroes GravityScale on Enter and puts the saved value back
+        // on Exit. That saved value has to ride the snapshot: a restore mid-cling
+        // that dropped it made the next Exit write 0, leaving the enemy weightless
+        // for good (and out of step with a peer that never rolled back).
+        var sim = new Simulation(Tunnel(), new Vector2(300f, TunnelFloorTopY - 12f),
+            g => g.SpawnEntity(EnemyFactory.Create(EntityKind.Latcher,
+                                                   new Vector2(60f, CeilingBottomY + 11f))));
+
+        for (int f = 0; f < 60; f++) sim.Step(Idle);
+        Assert.Equal(0f, FirstOfKind(sim, EntityKind.Latcher).GravityScale);   // latched
+
+        sim.Restore(sim.Snapshot());
+
+        // Take the ceiling away so the latch has nothing to hold.
+        for (int tx = -4; tx < 20; tx++)
+        for (int ty = 0; ty <= 1; ty++)
+            sim.Chunks.BreakCell(tx, ty);
+
+        // It should drop under gravity. (It may well latch again on the floor it
+        // lands on, so the check is the fall itself, not the scale at the end.)
+        bool hadGravity = false;
+        float lowestY = float.MinValue;
+        for (int f = 0; f < 90; f++)
+        {
+            sim.Step(Idle);
+            var latcher = FirstOfKind(sim, EntityKind.Latcher);
+            hadGravity |= latcher.GravityScale == 1f;
+            lowestY = MathF.Max(lowestY, latcher.Body.Position.Y);
+        }
+
+        Assert.True(hadGravity, "Latcher let go of the ceiling with GravityScale still 0.");
+        Assert.True(lowestY > TunnelMidpointY,
+            $"Latcher never fell after losing the ceiling (lowest y {lowestY:F1}).");
+    }
+
+    [Fact]
     public void GauntletTrio_SurvivesASnapshotRoundTrip()
     {
         // All three enemies plus a bolt in flight, snapshotted mid-encounter and

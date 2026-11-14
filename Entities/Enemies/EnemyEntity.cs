@@ -522,6 +522,7 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         base.WriteState(ref s);
         s.AIState      = _currentMovement;
         s.StateTime    = _moveVars.TimeInState;
+        s.SavedGravityScale = _moveVars.SavedGravityScale;
         s.Facing       = _facing;
         s.HitId        = _actionVars.HitId;
         s.ActionIdx    = _currentAction;
@@ -549,6 +550,7 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         _currentMovement       = s.AIState;
         _moveVars              = default;
         _moveVars.TimeInState  = s.StateTime;
+        _moveVars.SavedGravityScale = s.SavedGravityScale;
         _facing                = s.Facing;
         _currentAction         = s.ActionIdx;
         _actionVars            = default;
