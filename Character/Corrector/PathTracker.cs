@@ -135,6 +135,9 @@ public static class PathTracker
         Span<Vector2> beadQ = stackalloc Vector2[H];
         Span<Vector2> beadT = stackalloc Vector2[H];
         Span<float>   beadS = stackalloc float[H];
+        // Each tick's own projection, before the bead's forward-only clamp:
+        // negative = behind vertex 0, on the first segment's backward extension.
+        Span<float>   rawS  = stackalloc float[H];
 
         for (int pass = 0; pass < BeadPasses; pass++)
         {
@@ -145,7 +148,8 @@ public static class PathTracker
                 for (int T = 0; T < H; T++)
                 {
                     Vector2 delta = pass == 0 ? Vector2.Zero : s.TrackDelta[T];
-                    float sT = MathF.Max(sPrev, ProjectArc(s.BeadVerts, s.BeadArc, nv, s.DeliverySamples[T].Pos + delta));
+                    rawS[T] = ProjectArc(s.BeadVerts, s.BeadArc, nv, s.DeliverySamples[T].Pos + delta);
+                    float sT = MathF.Max(sPrev, rawS[T]);
                     sPrev = sT;
                     PointAt(s.BeadVerts, s.BeadArc, nv, sT, out beadQ[T], out beadT[T]);
                     beadS[T] = sT;
@@ -186,8 +190,20 @@ public static class PathTracker
                     // e: the FREE rollout's offset from the bead along n
                     // (rows measure Δp from the free rollout).
                     float e = Vector2.Dot(pT - q, n) - Vector2.Dot(delta, n);
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f, Reference = true };
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f, Reference = true };
+                    // The band is the SIDEWAYS row, and there is no route behind
+                    // vertex 0 to be beside: back there the first segment is only
+                    // a line continued, and on a tilted segment (the seed's drop to
+                    // the hover line) travel away from the route read as
+                    // perpendicular error that rising cured — a body knocked back
+                    // from a route behind it was lifted off the floor. A tick more
+                    // than the band (the path's resolution: the seed's grid snap)
+                    // behind the start is behind the route, which is along-path
+                    // error: Drive's and the progress row's, never the band's.
+                    if (rawS[T] >= -band)
+                    {
+                        s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f, Reference = true };
+                        s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f, Reference = true };
+                    }
                     if (arcSpeed)
                     {
                         // A speed along the path: the body's arc position is the

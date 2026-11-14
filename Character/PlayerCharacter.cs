@@ -291,14 +291,9 @@ public class PlayerCharacter : IHittable
         // Collision mode's MinLaunch floor, which would hand back most of the knockback
         // a leaky guard just ate.
         var applied = res.TargetDeltaV * guard.KnockbackScale * kbScale;
-        // Grounded knockback reduction (MovementConfig.GroundKnockbackScale, todo K3): a
-        // planted victim staggers along the floor instead of popping up.
-        if (IsGrounded)
-        {
-            var mc = MovementConfig.Current;
-            applied.X *= mc.GroundKnockbackScale;
-            if (applied.Y < 0f) applied.Y *= mc.GroundKnockbackRiseScale;
-        }
+        // No grounded reduction (todo K3 removed 2026-11-13): a standing victim used to
+        // take 0.8x horizontally and 0.5x upward, which made a launcher from below barely
+        // lift them. A grounded and an airborne victim now take the same velocity.
         if (hit.LaunchDecay > 0f) Launch(applied, in hit);
         else                      AddKnockback(applied);
 

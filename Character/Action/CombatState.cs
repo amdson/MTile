@@ -527,7 +527,7 @@ public class CombatState
 
     // Successful tech (Phase 4): end the launch (hitstun + stun + control-mute) and
     // grant a short i-frame window so the recovery isn't immediately re-punished.
-    // Called by TumbleState when the tech input lands inside the window.
+    // No caller today: TumbleState's tech trigger is removed for now (see its comment).
     public void Tech(int currentFrame, float dt, float invulnSeconds)
     {
         HitstunActive       = false;

@@ -25,8 +25,6 @@
   "MaxAirSpeed": 54,
   "CorrectorAirSpeed": 90,
   "FallGravityScale": 0.7,
-  "GroundKnockbackScale": 0.8,
-  "GroundKnockbackRiseScale": 0.5,
   "AirDrag": 300,
   "QuadraticAirDrag": 0.0005,
   "JumpVelocity": -87.5,

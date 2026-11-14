@@ -387,13 +387,6 @@ public class MovementConfig
     // .OnHit), not the hit's impulse, so armor/stun/hitstun thresholds — which read the
     // unscaled dv — are unchanged. Part of the todo #9 slowdown.
     public float KnockbackSpeedScale     { get; set; } = 0.75f;
-    // Grounded knockback reduction (todo K3, Melee crouch-cancel): a victim standing or
-    // crouching on the floor takes the applied knockback scaled by these - horizontal
-    // mildly, the UPWARD component hard, so they stagger along the floor and stay in
-    // reach instead of popping into the air where air options come back. Thresholds
-    // (armor / hitstun) still read the full dv; only the applied velocity shrinks.
-    public float GroundKnockbackScale     { get; set; } = 0.8f;
-    public float GroundKnockbackRiseScale { get; set; } = 0.5f;
 
     public float SproutLifetime          { get; set; } = 0.07f;   // painting / default
     public float AvalancheSproutLifetime { get; set; } = 0.04f;   // wave-tagged cells

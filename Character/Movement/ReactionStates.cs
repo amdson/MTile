@@ -109,7 +109,7 @@ public class StunnedState : MovementState
 // Airborne heavy-hit launch (COMBAT_FEEL_PLAN Phase 4). A hit whose impulse crosses
 // the stun threshold sets StunActive; while the victim is airborne that becomes a
 // Tumble rather than a grounded Stun. Tumble lives in the launch band (Active 51) so
-// once launched the body stays tumbling until it lands or techs — combined with the
+// once launched the body stays tumbling until it lands — combined with the
 // capability mask (which blocks WallCling/LedgeGrab during stun/hitstun) this is what
 // makes a knockback into a juggle/edgeguard instead of a free wall-cling reset.
 //
@@ -117,44 +117,14 @@ public class StunnedState : MovementState
 // is forced on so the muted speed cap never brakes the launch even in the stun tail
 // after hitstun lapses.
 //
-// Tech (defensive option): a buffered Jump intent while a surface is within the tech
-// probe (just before landing) ends the launch early, grants brief i-frames, and pops
-// the body up — so a read launch can be survived with precise timing. Outside that
-// window the body just rides the tumble down and eats the landing.
+// No tech (removed 2026-11-13). It was a buffered Jump with a surface within 60 px,
+// which had no timing to it: any launch near the floor was inside the window from its
+// first frame, hitstop included, and the dash chord's own Space press triggered it - so
+// a launched victim cancelled hitstun and the launch on frame 3 and dashed straight
+// back. The launch is ridden out. A tech that returns should be a timed read (not in
+// hitstop, only just before impact) and should consume the buffered dash.
 public class TumbleState : MovementState
 {
-    // Solid terrain within WallTechSlack ahead of the body along its horizontal motion.
-    public static bool WallAhead(EnvironmentContext ctx, out int dir)
-    {
-        float vx = ctx.Body.Velocity.X;
-        dir = vx > 0f ? 1 : vx < 0f ? -1 : 0;
-        if (dir == 0 || MathF.Abs(vx) < WallTechMinSpeed || ctx.Chunks == null) return false;
-        var b = ctx.Body.Bounds;
-        float edge = dir > 0 ? b.Right : b.Left;
-        float[] ys = { b.Top + 2f, (b.Top + b.Bottom) * 0.5f, b.Bottom - 2f };
-        for (float d = 1f; d <= WallTechSlack; d += Chunk.TileSize * 0.5f)
-            foreach (float y in ys)
-                if (TileQuery.IsSolidAt(ctx.Chunks, edge + dir * d, y)) return true;
-        return false;
-    }
-
-    // Tech window: ground detected within this slack below the body (but the body
-    // isn't yet "grounded" by the normal 20px probe, which would exit Tumble) opens
-    // the tech window — roughly the last few frames of the descent.
-    private const float TechProbeSlack   = 60f;
-    private const float TechInvulnSeconds = 0.25f;
-    private const float TechBounceVy     = 260f;   // upward pop on a successful tech
-    private const float TechHorizKeep    = 0.3f;   // fraction of horizontal speed kept
-    // Wall tech (todo G, 2026-11-05): the same read against a wall the launch is flying
-    // into. Solid within WallTechSlack ahead along the horizontal velocity + a buffered
-    // jump ⇒ the launch ends before the slam (no crush-stun, i-frames) and the body pops
-    // off the wall. Checked at three heights across the body so a lip or a one-tile post
-    // counts.
-    private const float WallTechSlack    = 60f;
-    private const float WallTechMinSpeed = 60f;    // px/s toward the wall; a drift isn't a slam
-    private const float WallTechPushVx   = 120f;   // away from the wall
-    private const float WallTechBounceVy = 160f;
-
     public override int ActivePriority  => MovementPriorities.TumbleActive;
     public override int PassivePriority => MovementPriorities.TumblePassive;
 
@@ -177,33 +147,6 @@ public class TumbleState : MovementState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        // Tech: buffered jump + a surface within the tech probe ⇒ bail the launch.
-        if (ctx.Combat != null
-            && ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)
-            && GroundChecker.TryFind(ctx.Body, ctx.Chunks,
-                   PlayerCharacter.Radius, PlayerCharacter.Radius,
-                   TechProbeSlack, ctx.Dt, out _))
-        {
-            ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
-            ctx.Combat.Tech(ctx.CurrentFrame, ctx.Dt, TechInvulnSeconds);
-            ctx.Body.Velocity = new Vector2(ctx.Body.Velocity.X * TechHorizKeep, -TechBounceVy);
-            ctx.Body.AppliedForce = Vector2.Zero;
-            ApplyAmbient(ctx, ref vars, FoldProfile.None);
-            return;
-        }
-
-        // Wall tech: flying into a wall with a buffered jump ⇒ same bail, off the wall.
-        if (ctx.Combat != null && WallAhead(ctx, out int wallDir)
-            && ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames))
-        {
-            ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
-            ctx.Combat.Tech(ctx.CurrentFrame, ctx.Dt, TechInvulnSeconds);
-            ctx.Body.Velocity = new Vector2(-wallDir * WallTechPushVx, -WallTechBounceVy);
-            ctx.Body.AppliedForce = Vector2.Zero;
-            ApplyAmbient(ctx, ref vars, FoldProfile.None);
-            return;
-        }
-
         // Launch must never be braked by the muted speed cap (the stun tail can
         // outlive hitstun, which is what otherwise forces PreserveExternalVelocity).
         ctx.Modifiers.PreserveExternalVelocity = true;
