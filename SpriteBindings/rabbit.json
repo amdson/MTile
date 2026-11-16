@@ -50,15 +50,6 @@
       ]
     },
     {
-      "Name": "head",
-      "Image": "rabbit/head.png",
-      "OffsetX": 480,
-      "OffsetY": 34,
-      "Bones": [
-        "head"
-      ]
-    },
-    {
       "Name": "arm_far",
       "Image": "rabbit/arm_far.png",
       "OffsetX": 476,
@@ -66,6 +57,25 @@
       "Tint": "#C8C8C8",
       "Bones": [
         "arm_l_*"
+      ]
+    },
+    {
+      "Name": "scarf",
+      "Image": "rabbit/scarf.png",
+      "OffsetX": 502,
+      "OffsetY": 261,
+      "Bones": [
+        "chest",
+        "hip"
+      ]
+    },
+    {
+      "Name": "head",
+      "Image": "rabbit/head.png",
+      "OffsetX": 480,
+      "OffsetY": 34,
+      "Bones": [
+        "head"
       ]
     }
   ],
