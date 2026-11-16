@@ -25,11 +25,13 @@ public sealed class HitFlashTracker
     public float Peak    = 0.9f;
 
     // Entries live on past their flash so a stamp that stops advancing can't re-fire,
-    // and are dropped once they are this stale — a target that no longer exists simply
-    // stops being stamped.
+    // and are dropped once nobody has stamped them for this long — a target that no
+    // longer exists simply stops being stamped. The clock is "since last STAMPED", not
+    // "since the flash ended": a live target is stamped every frame with a stamp that
+    // never resets, so pruning its entry would make the old hit look new and re-flash.
     private const float PruneAfter = 5f;
 
-    private struct Entry { public int Stamp; public float Left; }
+    private struct Entry { public int Stamp; public float Left; public float Unseen; }
 
     private readonly Dictionary<EntityId, Entry> _flashes = new();
     private readonly List<EntityId> _keys = new();
@@ -39,7 +41,12 @@ public sealed class HitFlashTracker
     public void Stamp(EntityId id, int stamp)
     {
         if (stamp <= 0) return;
-        if (_flashes.TryGetValue(id, out var e) && e.Stamp == stamp) return;
+        if (_flashes.TryGetValue(id, out var e) && e.Stamp == stamp)
+        {
+            e.Unseen = 0f;
+            _flashes[id] = e;
+            return;
+        }
         _flashes[id] = new Entry { Stamp = stamp, Left = Seconds };
     }
 
@@ -53,8 +60,9 @@ public sealed class HitFlashTracker
         foreach (var k in _keys)
         {
             var e = _flashes[k];
-            e.Left -= dt;
-            if (e.Left < -PruneAfter) _flashes.Remove(k);
+            if (e.Left > 0f) e.Left -= dt;
+            e.Unseen += dt;
+            if (e.Unseen > PruneAfter) _flashes.Remove(k);
             else _flashes[k] = e;
         }
     }

@@ -37,6 +37,21 @@ public class HitFlashTests
         Assert.Equal(1f, t.Intensity(A), 3);
     }
 
+    // The stale-entry prune must not turn an old hit into a new one: a target that is
+    // still being stamped every frame keeps its entry however long ago the hit was.
+    // (It used to prune 5 s after the flash and re-fire on the next stamp, forever.)
+    [Fact]
+    public void OldStamp_NeverRefires_WhileTheTargetKeepsBeingStamped()
+    {
+        var t = new HitFlashTracker { Seconds = 0.10f, Peak = 1f };
+        t.Stamp(A, 42);
+        for (int i = 0; i < 60 * 20; i++)
+        {
+            t.Tick(1f / 60f); t.Stamp(A, 42);
+            if (i > 10) Assert.Equal(0f, t.Intensity(A));
+        }
+    }
+
     [Fact]
     public void Targets_AreIndependent_AndZeroStampIsIgnored()
     {
