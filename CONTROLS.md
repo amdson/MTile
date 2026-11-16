@@ -99,6 +99,7 @@ mapping is in `Stage.cs`.
 | F8 | Run the corrector-QP microbenchmark (blocks ~1.5 s) |
 | F9 | Play the dev tone (audio chain check) |
 | F10 | Mute / unmute |
+| `` ` `` (backquote) | Show / hide the on-screen debug text (state readout + frame timings); off by default |
 | Esc | Quit |
 
 ## `configs/game_config.json` — the settings worth knowing
@@ -116,7 +117,8 @@ Read at launch (F5 re-reads only the fields noted above). Full list with default
 | `AnimationRig`, `PlayerSpriteBindings` | Character rig + skin (`rabbit_floppy` on `biped_rabbit`) |
 | `DrawPlayerSpriteSkin`, `DrawPlayerSprites`, `DrawBackground`, `BackgroundStyle` | What draws |
 | `DebugDraw*` | Overlays: hitboxes, hurtboxes, bodies, skeleton, constraints, corrector paths, step planner, health bars, force fields… |
-| `DebugFrameTimings` | Per-pass frame-time HUD line |
+| `DebugFrameTimings` | Per-pass frame-time HUD line (shown only while the debug text is on) |
+| `ShowDebugText` | Start with the debug text visible (default off; `` ` `` toggles) |
 | `FreezeFrame*` | Start frozen at a set position/velocity (corrector debugging) |
 | `StageSaveChunkRadius` | Ctrl+M capture radius, in chunks |
 

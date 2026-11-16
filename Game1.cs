@@ -1029,6 +1029,10 @@ public class Game1 : Game
         // ...and the same bench armed by ?qpbench=1 on the web host, which is how the
         // headless driver triggers it (Chrome keeps the function keys for itself).
         if (QpBench.PollStartup(out string qpReport)) Console.WriteLine("[perf] " + qpReport);
+        // Backquote: show/hide the on-screen debug text (state readout + frame timings).
+        // Not a function key, so it also reaches the canvas in the browser.
+        if (keyboardState.IsKeyDown(Keys.OemTilde) && !_prevKeys.IsKeyDown(Keys.OemTilde))
+            _config.ShowDebugText = !_config.ShowDebugText;
         if (keyboardState.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10))
         {
             _audio.Mixer.Muted = !_audio.Mixer.Muted;
@@ -1560,7 +1564,7 @@ public class Game1 : Game
         _prof.End(_sGlow, tGlow);
 
         long tHud = _prof.Begin();
-        _hud.Draw(LocalPlayer, LocalAnimator, _mouseScreen, OtherPlayers());
+        _hud.Draw(LocalPlayer, LocalAnimator, _mouseScreen, OtherPlayers(), _config.ShowDebugText);
         _bossBars.Draw(_spriteBatch, _debugFont, _pixel, GraphicsDevice.Viewport, _sim.Entities,
                        (float)gameTime.ElapsedGameTime.TotalSeconds);
         if (string.Equals(_activeStage, "depths", StringComparison.OrdinalIgnoreCase))
@@ -1600,7 +1604,7 @@ public class Game1 : Game
         }
         _prof.End(_sHud, tHud);
 
-        if (_config.DebugFrameTimings)
+        if (_config.DebugFrameTimings && _config.ShowDebugText)
         {
             // Two lines: the per-pass breakdown (mean ms over the window, worst appended
             // only for passes that spike), then the scene counters that explain it.

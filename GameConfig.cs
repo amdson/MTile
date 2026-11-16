@@ -62,6 +62,12 @@ public sealed class GameConfig
     // CATCH-UP marker whenever MonoGame reports IsRunningSlowly (fixed-timestep
     // debt — the classic cause of visible lag spirals).
     public bool DebugFrameTimings          { get; set; } = true;
+
+    // Whether the on-screen debug TEXT starts visible: the movement-state / action /
+    // clip readout top-left, and (when DebugFrameTimings is on) the frame-time lines
+    // under it. Off by default; the backquote key (`) toggles it at runtime. The
+    // always-on HUD (health, blocks, meters) is not part of it.
+    public bool ShowDebugText              { get; set; } = false;
     // Netcode trace: every 30th sim frame, both peers print frame + sim checksum +
     // both player positions. Diffing the two peers' logs by frame number locates the
     // exact frame a desync began — the built-in guard can miss one entirely, since it

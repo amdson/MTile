@@ -33,7 +33,8 @@ public sealed class HudRenderer
     // `others` are every other player in the match (labelled "P1", "P2", …), drawn as a
     // stack of health bars top-left — empty outside a fight.
     public void Draw(PlayerCharacter player, CharacterAnimator animator, Point mouseScreen,
-                     System.Collections.Generic.IReadOnlyList<(string Label, PlayerCharacter Player)> others = null)
+                     System.Collections.Generic.IReadOnlyList<(string Label, PlayerCharacter Player)> others = null,
+                     bool debugText = true)
     {
         _spriteBatch.Begin();
         _spriteBatch.Draw(_pixel, new Rectangle(mouseScreen.X - 2, mouseScreen.Y - 2, 5, 5), Color.Red);
@@ -43,9 +44,12 @@ public sealed class HudRenderer
         // readouts below they are not behind a GameConfig debug flag.
         DrawPlayerHud(player);
         int top = DrawOtherPlayers(others);
-        _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8, top +  8), Color.White);
-        _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, top + 24), Color.White);
-        _spriteBatch.DrawString(_debugFont, $"Anim: {animator.State.Clip}", new Vector2(8, top + 40), Color.Aqua);
+        if (debugText)
+        {
+            _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8, top +  8), Color.White);
+            _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, top + 24), Color.White);
+            _spriteBatch.DrawString(_debugFont, $"Anim: {animator.State.Clip}", new Vector2(8, top + 40), Color.Aqua);
+        }
         DrawBlockPickerHud(player);
         DrawBuildMetersHud(player);
 
