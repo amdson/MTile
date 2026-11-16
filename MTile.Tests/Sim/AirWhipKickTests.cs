@@ -146,8 +146,12 @@ public class AirWhipKickTests
         var line  = StrikeVictimAt(new Vector2(-1.8f * R, Hip), drift);
 
         // Heavy tier since the 2026-11-05 damage spread: 0.6 on the line, doubled at the tip.
-        Assert.Equal(0.6f, line.hpLost, 3);
-        Assert.Equal(1.2f, tip.hpLost, 3);
+        // Both scale with the wind-up charge: Swipe's hold measures 16 frames of ramp.
+        float charge = MathHelper.Lerp(1f, RecoveryAction.MaxChargeDamageBoost,
+                                       RecoveryAction.ChargeFraction(16 * Dt));
+        Assert.Equal(0.6f * charge, line.hpLost, 3);
+        // Sweet spot x charge is capped on body damage.
+        Assert.Equal(0.6f * MathF.Min(2f * charge, RecoveryAction.MaxBodyDamageBoost), tip.hpLost, 3);
         Assert.True(tip.launch > 2f * line.launch,
             $"sweet-spot launch {tip.launch} should far exceed the line's {line.launch}");
     }

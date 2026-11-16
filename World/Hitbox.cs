@@ -164,6 +164,14 @@ public readonly struct Hitbox
     // solid cell takes the damage, as before.
     public readonly float       TileMaxMaterialHP;
 
+    // Tile impact: when > 0, the first time this ATTACK (HitId) touches solid terrain it
+    // also spends this much energy (HP units, the same scale as Damage) through
+    // ImpactSpringField — the crater solver a crashing body uses — seeded at the first
+    // cell the strike meets and pushed along the strike direction. Unlike Damage, which
+    // stamps every overlapped cell each frame, this is ONE shared budget spent once, and
+    // it spreads past the hitbox: deep in dirt, shallow in stone. Default 0 ⇒ off.
+    public readonly float       TileImpact;
+
     // Launch (Physics/Launch.cs). 0 = off: the knockback is plain velocity, as every
     // attack had before launches existed. > 0: the victim's knockback becomes a launch
     // that bleeds off at this many px/s², replacing any launch already running —
@@ -195,6 +203,7 @@ public readonly struct Hitbox
     //              · launchBounce (terrain restitution while launched; 0 = the body's own)
     //   Stun       stunSeconds (0 = none; declared per attack)
     //   Soft hit   tileMaxMaterialHP (0 = off; tiles tougher than this are skipped)
+    //   Tile impact tileImpact (0 = off; one crater's worth of HP per attack, on contact)
     //   Clank      clank (None = passes through other attacks; Blade/Blunt = melee)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
@@ -217,8 +226,10 @@ public readonly struct Hitbox
                   float stunSeconds = 0f,
                   float launchBounce = 0f,
                   float hitstopSecondsOverride = -1f,
-                  float tileMaxMaterialHP = 0f)
+                  float tileMaxMaterialHP = 0f,
+                  float tileImpact = 0f)
     {
+        TileImpact           = tileImpact;
         TileMaxMaterialHP    = tileMaxMaterialHP;
         Clank                = clank;
         StunSeconds          = stunSeconds;

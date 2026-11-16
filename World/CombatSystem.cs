@@ -87,6 +87,9 @@ public sealed class CombatSystem
     // table means it snapshots and prunes with it. Index -1 is never minted (ids start
     // at 1, and None — the tile-pogo latch — is 0).
     private static readonly EntityId ClankedMark = new(-1);
+    // Dedupe-set marker: this attack has already spent its Hitbox.TileImpact crater.
+    private static readonly EntityId TileImpactMark = new(-2);
+    private readonly List<(int gtx, int gty)> _impactSeedScratch = new(1);
     private readonly List<int> _scratchClank = new();
 
     // Keep this HitId's dedupe entry alive through a frame it doesn't broadcast.
@@ -182,6 +185,12 @@ public sealed class CombatSystem
                 }
                 if (hit.Occluded) _scratchCells.Sort();
 
+                // Tile impact (Hitbox.TileImpact): one crater per attack, on first contact,
+                // BEFORE the direct pass so the field reads the rock as the strike found it.
+                if (hit.TileImpact > 0f && _scratchCells.Count > 0 && !alreadyHit.Contains(TileImpactMark)
+                    && ApplyTileImpact(in hit, chunks))
+                    alreadyHit.Add(TileImpactMark);
+
                 // Terrain-strike cue: of the reachable cells, the one nearest the
                 // hitbox's centre (where the blade actually is, not the attacker's feet).
                 bool wantStrike = OnTerrainStrike != null && hit.Occluded && Factions.IsPlayer(hit.Owner);
@@ -191,6 +200,8 @@ public sealed class CombatSystem
                 Vector2 strikeAt = default;
                 foreach (var (_, gtx, gty) in _scratchCells)
                 {
+                    // A tile impact above may already have cleared this cell.
+                    if (hit.TileImpact > 0f && chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
                     if (hit.Occluded && !TileReach.IsCellReachable(chunks, hit.Origin, gtx, gty))
                         continue;
                     if (wantStrike)
@@ -491,6 +502,34 @@ public sealed class CombatSystem
     private Func<EntityId, IHittable> _resolveDuringApply;
     public void NotifyAttackerGuardStopped(in Hitbox hit, Vector2 push, float hitstopSeconds, float slideSeconds)
         => _resolveDuringApply?.Invoke(hit.Source)?.OnGuardStopped(push, hitstopSeconds, slideSeconds);
+
+    // Spend hit.TileImpact as a crater. The seed is the gathered cell furthest UPSTREAM
+    // along the strike (smallest projection on its direction) that the hit can reach —
+    // the first rock the strike meets. False when no cell is reachable, so the attack
+    // keeps its crater for a later frame.
+    private bool ApplyTileImpact(in Hitbox hit, ChunkMap chunks)
+    {
+        var dir = hit.StrikeDir;
+        if (dir.LengthSquared() < 1e-6f) dir = hit.KnockbackImpulse;
+        if (dir.LengthSquared() < 1e-6f) return false;
+        dir.Normalize();
+
+        bool found = false;
+        float best = float.MaxValue;
+        int sx = 0, sy = 0;
+        foreach (var (_, gtx, gty) in _scratchCells)
+        {
+            if (hit.Occluded && !TileReach.IsCellReachable(chunks, hit.Origin, gtx, gty)) continue;
+            float along = (gtx + 0.5f) * dir.X + (gty + 0.5f) * dir.Y;
+            if (along < best) { best = along; sx = gtx; sy = gty; found = true; }
+        }
+        if (!found) return false;
+
+        _impactSeedScratch.Clear();
+        _impactSeedScratch.Add((sx, sy));
+        ImpactSpringField.Apply(chunks, sx, sy, dir, hit.TileImpact, _impactSeedScratch);
+        return true;
+    }
 
     // The cap (Hitbox.MaxRecoilSpeed) is applied to the running TALLY, not to each
     // contribution: the stab's tile bounce and its entity recoil can land on the same

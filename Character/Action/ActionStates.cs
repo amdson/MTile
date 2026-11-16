@@ -272,6 +272,53 @@ public class RecoveryAction : ActionState
     public const float SettleFraction    = 0.6f;   // flat value for an overheld charge
     public const float ChargeFallSpeed   = 120f;   // px/s terminal fall while charging in the air
 
+    // What the charge buys every hold-and-swipe strike (Stab, AirWhipKick, AirHammer):
+    // DAMAGE only, on both the body and the tile number — tap ≈ 1×, sweet spot 2×,
+    // overheld settle 1.6×. Geometry and launch stay each move's own calibration.
+    // Body damage is additionally capped: charge × the move's other multiplier (the
+    // stab's dive boost, the kick/hammer sweet spot) never exceeds MaxBodyDamageBoost,
+    // so stacking both rewards tops out at 2.5× base rather than 4× (todo F).
+    public const float MaxChargeDamageBoost = 2.0f;
+    public const float MaxBodyDamageBoost   = 2.5f;
+
+    // PERFECT release — the button comes up inside the sweet spot (the white flash).
+    // A step on top of the charge curve, not part of it: the launch jumps ×2.5 and body
+    // damage takes ×1.3 AFTER the MaxBodyDamageBoost cap, so the flash is worth far more
+    // than the last frame of the ramp beside it. On terrain the strike also lands as an
+    // IMPACT (Hitbox.TileImpact): one crater of PerfectTileImpact HP where it first meets
+    // rock, reaching past the weapon's tip — ≈34 dirt cells / 15 stone, 4 / 3 deep into a
+    // flat face. The direct tile number keeps only its ordinary charge scaling.
+    public const float PerfectTileImpact    = 48f;
+    public const float PerfectKnockbackMult = 2.5f;
+    public const float PerfectBodyMult      = 1.3f;
+
+    public static float PerfectImpact(in ActionVars vars)    => vars.PerfectCharge ? PerfectTileImpact    : 0f;
+    public static float PerfectKnockback(in ActionVars vars) => vars.PerfectCharge ? PerfectKnockbackMult : 1f;
+    public static float PerfectBody(in ActionVars vars)      => vars.PerfectCharge ? PerfectBodyMult      : 1f;
+
+    // Consume the charge stamp and return it as a damage multiplier (1 = uncharged).
+    // Also latches vars.PerfectCharge: ChargeFraction reaches exactly 1 only inside
+    // the sweet spot (the ramp is < 1, the settle is SettleFraction).
+    public static float TakeChargeDamageBoost(EnvironmentContext ctx, ref ActionVars vars)
+    {
+        float charge = TakeCharge(ctx, ref vars);
+        vars.PerfectCharge = charge >= 1f;
+        return MathHelper.Lerp(1f, MaxChargeDamageBoost, charge);
+    }
+
+    // Consume the charge stamp and return the fraction [0,1]. Honored only when the
+    // stamp is at most a frame old — the direct release path stamps and fires in the
+    // SAME frame (Recovery exits → Null bridges → the strike enters), so anything
+    // older is a leftover from a hold that resolved into a different move, reached
+    // here on a buffered intent. Zeroed either way so it can't feed a second strike.
+    public static float TakeCharge(EnvironmentContext ctx, ref ActionVars vars)
+    {
+        bool fresh = vars.StabCharge > 0f && ctx.CurrentFrame - vars.StabChargeFrame <= 1;
+        float charge = fresh ? vars.StabCharge : 0f;
+        vars.StabCharge = 0f;
+        return charge;
+    }
+
     private const int   PassiveBase   = 45;     // countdown handoff / wind-up entry bid
     // Flinch bid — above every action's Active (Grab is 48), so a registered hit
     // always interrupts. Universality is deliberate: "this move can't be
@@ -1456,7 +1503,7 @@ public class StabAction : ActionState
     // launcher should hurt more without carving more.
     private const float BodyDamageBase        = 1.8f * SlashLikeAction.SlashDamagePerFrame;   // 0.9 HP (todo F; was 1.5x = 0.75)
     // Ceiling on dive x charge for BODY damage: a max stab is ~2.25 HP, not 4.5 (todo F).
-    private const float MaxCombinedBoost      = 2.5f;
+    private const float MaxCombinedBoost      = RecoveryAction.MaxBodyDamageBoost;
     // Safe on hit (todo H): past the stab's own ~25f remaining + 24f tail.
     private const float HitstunSeconds        = 0.85f;
     // Collision-mode striker (HitResolver.Resolve): the stab is a virtual body
@@ -1526,7 +1573,6 @@ public class StabAction : ActionState
     // "deliberately untouched" calibration against the parry/recoil/stun stack.
     // The curve makes the effective range: tap ≈ 1×, full ramp + sweet spot 2×,
     // overheld settle 1.6×.
-    private const float MaxChargeBoost = 2.0f;
 
 
     // Tip ribbon — short lifetime so the trail snaps with the strike rather than
@@ -1608,15 +1654,8 @@ public class StabAction : ActionState
             vars.Boost = MathHelper.Lerp(MinBoost, MaxBoost, t);
         }
 
-        // Wind-up charge → damage multiplier. Honored only when the stamp is at
-        // most a frame old — the direct release path stamps and fires in the
-        // SAME frame (Recovery exits → Null bridges → Stab enters), so anything
-        // older is a leftover from a hold that resolved into a different move,
-        // reached here on a buffered intent. Consumed either way so it can't
-        // feed a second stab.
-        bool chargeFresh = vars.StabCharge > 0f && ctx.CurrentFrame - vars.StabChargeFrame <= 1;
-        vars.ChargeBoost = chargeFresh ? MathHelper.Lerp(1f, MaxChargeBoost, vars.StabCharge) : 1f;
-        vars.StabCharge  = 0f;
+        // Wind-up charge → damage multiplier (freshness gate in TakeCharge).
+        vars.ChargeBoost = RecoveryAction.TakeChargeDamageBoost(ctx, ref vars);
     }
 
     // Superarmor through the wind-up + strike (HIT_AIRLOCK_PLAN §4): light pokes
@@ -1758,7 +1797,9 @@ public class StabAction : ActionState
             // still reads correctly.
             float rotation = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
             float dmg = DamagePerFrame * vars.Boost * vars.ChargeBoost;
-            float bodyDmg = BodyDamageBase * MathF.Min(vars.Boost * vars.ChargeBoost, MaxCombinedBoost);
+            float bodyDmg = BodyDamageBase * MathF.Min(vars.Boost * vars.ChargeBoost, MaxCombinedBoost)
+                          * RecoveryAction.PerfectBody(vars);
+            float perfectKb = RecoveryAction.PerfectKnockback(vars);
 
             // Each box grows from the body out to the LIVE tip (vars.TipExt, the same
             // curve that drives the visible thrust + glow), floored so a point-blank
@@ -1786,17 +1827,18 @@ public class StabAction : ActionState
                 recoilMinMaterialHP: RecoilMinMaterialHP,
                 mode: KnockbackMode.Collision,
                 strikeDir: vars.StabDir,
-                strikeVelocity: ctx.Body.Velocity + vars.StabDir * MovementConfig.Current.StabStrikeSpeed,
+                strikeVelocity: ctx.Body.Velocity + vars.StabDir * (MovementConfig.Current.StabStrikeSpeed * perfectKb),
                 strikeMass: ctx.Mass * MovementConfig.Current.StabStrikeMassScale,
                 restitution: MovementConfig.Current.StabRestitution,
-                minLaunch: MovementConfig.Current.StabMinLaunch,
+                minLaunch: MovementConfig.Current.StabMinLaunch * perfectKb,
                 minRecoilSpeed: MinRecoilSpeed,
                 maxRecoilSpeed: MaxRecoilSpeed,
                 origin: ctx.Body.Position,
                 launchDecay: MovementConfig.Current.StabLaunchDecay,
                 launchImpactMass: MovementConfig.Current.StabLaunchImpactMass,
                 launchBounce: MovementConfig.Current.StabLaunchBounce,
-                clank: ClankKind.Blade));
+                clank: ClankKind.Blade,
+                tileImpact: RecoveryAction.PerfectImpact(vars)));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No
             // knockback (knockback comes from the primary box). Tiles only — passes
@@ -1817,7 +1859,9 @@ public class StabAction : ActionState
                 blockColor,
                 HitTargets.TilesOnly,
                 shape: blockPoly, shapePos: blockCenter, shapeRotation: rotation,
-                origin: ctx.Body.Position));
+                strikeDir: vars.StabDir,
+                origin: ctx.Body.Position,
+                tileImpact: RecoveryAction.PerfectImpact(vars)));
         }
     }
 
@@ -1996,9 +2040,8 @@ public class AirWhipKick : ActionState
         vars.StabDir = new Vector2(facing * MathF.Cos(angle), MathF.Sin(angle));
         vars.InitialStabAngle = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
 
-        // A stab wind-up that resolved into the kick doesn't carry its charge — and
-        // must not leave it for a later stab either.
-        vars.StabCharge = 0f;
+        // Wind-up charge → damage multiplier, the same handoff StabAction reads.
+        vars.ChargeBoost = RecoveryAction.TakeChargeDamageBoost(ctx, ref vars);
     }
 
     public override int CommitProfile(EnvironmentContext ctx, in ActionVars vars)
@@ -2046,21 +2089,25 @@ public class AirWhipKick : ActionState
         var origin = LineOrigin(ctx.Body.Position);
         var center = origin + vars.StabDir * (start + length * 0.5f);
         ctx.Hitboxes.Publish(new Hitbox(
-            poly.GetBoundingBox(center, rotation), vars.HitId, TileDamagePerFrame * damageMult,
+            poly.GetBoundingBox(center, rotation), vars.HitId,
+            TileDamagePerFrame * damageMult * vars.ChargeBoost,
             vars.StabDir * KnockbackMagnitude,
             ctx.Faction, ctx.SelfId, color,
-            bodyDamage: BodyDamage * damageMult,
+            bodyDamage: BodyDamage * MathF.Min(damageMult * vars.ChargeBoost, RecoveryAction.MaxBodyDamageBoost)
+                        * RecoveryAction.PerfectBody(vars),
             hitstunSecondsOverride: HitstunSeconds,
             shape: poly, shapePos: center, shapeRotation: rotation,
             mode: KnockbackMode.Collision,
             strikeDir: vars.StabDir,
-            strikeVelocity: ctx.Body.Velocity + vars.StabDir * (StrikeSpeed * knockbackMult),
+            strikeVelocity: ctx.Body.Velocity
+                            + vars.StabDir * (StrikeSpeed * knockbackMult * RecoveryAction.PerfectKnockback(vars)),
             strikeMass: ctx.Mass,
             restitution: Restitution,
-            minLaunch: MinLaunch * knockbackMult,
+            minLaunch: MinLaunch * knockbackMult * RecoveryAction.PerfectKnockback(vars),
             origin: origin,
             launchDecay: MovementConfig.Current.WhipKickLaunchDecay,
-            clank: ClankKind.Blunt));
+            clank: ClankKind.Blunt,
+            tileImpact: RecoveryAction.PerfectImpact(vars)));
     }
 
     // Tip extension along StabDir at normalized time t, in px: a short chamber at the
@@ -2187,9 +2234,8 @@ public class AirHammerAction : ActionState
         vars.HitId       = ctx.HitIds.Next();
         vars.Facing      = ab.Facing == 0 ? 1 : ab.Facing;
         ctx.Intents.Consume(IntentType.Stab, ctx.CurrentFrame);
-        // The wind-up hold stamps a stab charge on release; the hammer's damage is
-        // fixed, so drop it rather than let a later buffered stab inherit it.
-        vars.StabCharge  = 0f;
+        // Wind-up charge → damage multiplier, the same handoff StabAction reads.
+        vars.ChargeBoost = RecoveryAction.TakeChargeDamageBoost(ctx, ref vars);
     }
 
     public override float ArmorProfile(in ActionVars vars)
@@ -2234,23 +2280,32 @@ public class AirHammerAction : ActionState
         var bodyVel   = ctx.Body.Velocity * StrikeBodyVelocityShare;
         float mass    = ctx.Mass * StrikeMassScale;
 
+        // Charge scales damage on both boxes; body damage caps at MaxBodyDamageBoost.
+        // A perfect release steps tile damage, launch and body damage up again.
+        float charge    = vars.ChargeBoost;
+        float tile      = OuterTileDamage * charge;
+        float impact    = RecoveryAction.PerfectImpact(vars);
+        float pBody     = RecoveryAction.PerfectBody(vars);
+        float pKb       = RecoveryAction.PerfectKnockback(vars);
+        float sweetBody = MathF.Min(SweetDamageMult * charge, RecoveryAction.MaxBodyDamageBoost) * pBody;
+
         // Sweet spot first — see the class comment on publish order.
         PublishBox(ctx, vars.HitId, center, SweetSide, SweetSide * 1.5f,
-                   OuterTileDamage * SweetDamageMult, OuterBodyDamage * SweetDamageMult,
-                   strikeDir, bodyVel + strikeDir * (StrikeSpeed * SweetKnockbackMult),
-                   mass, MinLaunch * SweetKnockbackMult, Color.White,
+                   tile * SweetDamageMult, OuterBodyDamage * sweetBody,
+                   strikeDir, bodyVel + strikeDir * (StrikeSpeed * SweetKnockbackMult * pKb),
+                   mass, MinLaunch * SweetKnockbackMult * pKb, Color.White, impact,
                    stunSeconds: CombatState.DefaultStunSeconds);   // the spike stuns; the outer box only launches
 
         PublishBox(ctx, vars.HitId, center, OuterSide, OuterSide * 1.5f, 
-                   OuterTileDamage, OuterBodyDamage,
-                   strikeDir, bodyVel + strikeDir * StrikeSpeed,
-                   mass, MinLaunch, HammerColor);
+                   tile, OuterBodyDamage * charge * pBody,
+                   strikeDir, bodyVel + strikeDir * (StrikeSpeed * pKb),
+                   mass, MinLaunch * pKb, HammerColor, impact);
     }
 
     private static void PublishBox(EnvironmentContext ctx, int hitId, Vector2 center, float side, float height, 
                                    float tileDamage, float bodyDamage,
                                    Vector2 strikeDir, Vector2 strikeVelocity, float strikeMass,
-                                   float minLaunch, Color color, float stunSeconds = 0f)
+                                   float minLaunch, Color color, float tileImpact, float stunSeconds = 0f)
     {
         float hw = side * 0.5f;
         float hh = height;
@@ -2273,7 +2328,8 @@ public class AirHammerAction : ActionState
             stunSeconds: stunSeconds,
             hitstunSecondsOverride: HitstunSeconds,
             launchDecay: LaunchDecay,
-            launchImpactMass: LaunchMass));
+            launchImpactMass: LaunchMass,
+            tileImpact: tileImpact));
     }
 }
 
@@ -2815,9 +2871,7 @@ public class BurstAction : ActionState
         // Wind-up charge → knockback/reach scale. Recovery.Exit stamped it this same
         // frame (it was preempted just before this Enter); the freshness gate and the
         // consume mirror StabAction.Enter.
-        bool chargeFresh = vars.StabCharge > 0f && ctx.CurrentFrame - vars.StabChargeFrame <= 1;
-        vars.ChargeBoost = chargeFresh ? vars.StabCharge : 0f;
-        vars.StabCharge  = 0f;
+        vars.ChargeBoost = RecoveryAction.TakeCharge(ctx, ref vars);
         // Eat the wind-up's press so releasing LMB after the burst can't also
         // spend the gesture on a slash.
         ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);

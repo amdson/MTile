@@ -161,9 +161,13 @@ public class AirHammerTests(ITestOutputHelper output)
         var core  = StrikeVictimAt(new Vector2(0.35f * R,          2.3f * R), drift);
         var outer = StrikeVictimAt(new Vector2(0.35f * R + 1.15f * R, 2.3f * R), drift);
 
-        // 0.8 outer / 1.6 sweet since the 2026-11-05 damage spread (was 1.0 / 2.0).
-        Assert.Equal(0.8f, outer.hpLost, 3);
-        Assert.Equal(1.6f, core.hpLost, 3);
+        // 0.8 outer / 1.6 sweet since the 2026-11-05 damage spread (was 1.0 / 2.0),
+        // times the wind-up charge: Swipe's hold measures 16 frames of ramp.
+        float charge = MathHelper.Lerp(1f, RecoveryAction.MaxChargeDamageBoost,
+                                       RecoveryAction.ChargeFraction(16 * Dt));
+        Assert.Equal(0.8f * charge, outer.hpLost, 3);
+        // Sweet spot x charge is capped on body damage.
+        Assert.Equal(0.8f * MathF.Min(2f * charge, RecoveryAction.MaxBodyDamageBoost), core.hpLost, 3);
         Assert.True(core.launch > 2f * outer.launch,
             $"sweet-spot launch {core.launch} should far exceed the outer box's {outer.launch}");
     }
