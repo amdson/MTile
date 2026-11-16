@@ -84,6 +84,15 @@ else if (_phase == Phase.Playing && _bootDone && _peerInterrupted && !_peerLost)
                         }
                         The host picks the stage; matches connect peer-to-peer.
                     </p>
+                    <p class="mtile-botrow">
+                        <label for="mtile-bot">P2 AI (solo only):</label>
+                        <select id="mtile-bot" class="mtile-select" @bind="_bot">
+                            @foreach (var b in BotChoices)
+                            {
+                                <option value="@b.Name">@b.Label</option>
+                            }
+                        </select>
+                    </p>
                     <div class="mtile-row">
                         <button class="mtile-btn" @onclick="StartSolo">Solo</button>
                         @if (_signalReady)
@@ -257,6 +266,11 @@ else if (_phase == Phase.Playing && _bootDone && _peerInterrupted && !_peerLost)
     }
     .mtile-tag-coop { border-color: #6a8; color: #9fc; }
     .mtile-stageline { margin: 0.4rem 0; }
+    .mtile-botrow { margin: 0.6rem 0; }
+    .mtile-select {
+        margin-left: 0.4rem; background: #1b1b1b; color: #eee; border: 1px solid #333;
+        border-radius: 4px; padding: 0.3rem 0.5rem; font: inherit;
+    }
     .mtile-overlay {
         position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.72); color: #eee;
         font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center;

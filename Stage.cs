@@ -393,6 +393,18 @@ public static partial class Stages
             PlayerSpawn   = new Vector2(0f, 0f),
             Populate      = _ => { },
         });
+
+        // ─── adventure ────────────────────────────────────────────────────────
+        // Endless gentle world (Levels/adventure.json): the spires generator with
+        // only its rolling base left on — low dirt hills, ten tiles of dirt over
+        // stone, no end in either direction. The web lobby's first/default stage.
+        // Spawn Y is nominal, as for spires.
+        Register(new Stage {
+            Name          = "adventure",
+            TerrainConfig = "adventure.json",
+            PlayerSpawn   = new Vector2(0f, 0f),
+            Populate      = _ => { },
+        });
     }
 
     public static void Register(Stage s) => _registry[s.Name] = s;

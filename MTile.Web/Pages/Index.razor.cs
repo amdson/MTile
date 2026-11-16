@@ -75,6 +75,19 @@ public partial class Index : IDisposable
     // ── stage selection + handshake state ──
     private string _stage = LobbyStages.All[0].Name;   // host/solo choice; joiner adopts the host's
     private LobbyStage StageInfo => LobbyStages.Find(_stage);
+    // Solo only: which bot drives a second player ("" = none, the default). The names
+    // are GameConfig.BotOpponent's — Game1 maps them to the bot brains.
+    private string _bot = "";
+    private static readonly (string Name, string Label)[] BotChoices =
+    {
+        ("",        "None"),
+        ("Brawler", "Brawler (stock)"),
+        ("Bulldog", "Bulldog (rushdown)"),
+        ("Rampart", "Rampart (terrain zoner)"),
+        ("Riposte", "Riposte (counter-fighter)"),
+        ("Citadel", "Citadel (terrain + melee)"),
+        ("Ranger",  "Ranger (rushdown that chases)"),
+    };
     private bool IsCoop => StageInfo?.Coop ?? false;
     private string StageLabel => StageInfo?.Label ?? _stage;
     private string PeerNoun => IsCoop ? "partner" : "opponent";
@@ -486,6 +499,11 @@ public partial class Index : IDisposable
             {
                 var g = _net != null ? new MTile.Game1(_net) : new MTile.Game1();
                 g.StageOverride = _stage;
+                // Solo in the browser is just the player unless the lobby's "P2 AI"
+                // dropdown picked a bot, whatever the shared game_config.json says.
+                // A networked match forces P2 on and never runs a bot.
+                g.SecondPlayerOverride = _bot.Length > 0;
+                g.BotOpponentOverride  = _bot;
                 _game = g;
                 _game.Run();
                 _bootDone = true;

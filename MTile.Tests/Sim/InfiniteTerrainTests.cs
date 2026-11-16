@@ -385,4 +385,52 @@ public class InfiniteTerrainTests(ITestOutputHelper output)
         Assert.True(sim.Player.Body.Position.Y < surfacePx + 4f * Chunk.TileSize,
             "player sank through the generated ground");
     }
+
+    // The web lobby's default stage: gentle dirt hills, ten tiles of dirt, stone below.
+    [Fact]
+    public void AdventureStage_IsGentleDirtHills_OverStone()
+    {
+        var registered = Stages.Get("adventure");
+        Assert.Equal("adventure.json", registered.TerrainConfig);
+
+        var stage = new Stage
+        {
+            Name          = registered.Name,
+            TerrainConfig = System.IO.Path.Combine(FindLevels(), "adventure.json"),
+            PlayerSpawn   = registered.PlayerSpawn,
+            Populate      = registered.Populate,
+        };
+        var sim = new Simulation(new GameConfig(), stage);
+        var gen = Assert.IsType<WorldGenerator>(sim.Chunks.Generator);
+
+        int lo = int.MaxValue, hi = int.MinValue, maxStep = 0, steps = 0;
+        for (int x = -20000; x < 20000; x++)
+        {
+            int y = gen.SurfaceY(x);
+            lo = Math.Min(lo, y); hi = Math.Max(hi, y);
+            int d = Math.Abs(y - gen.SurfaceY(x + 1));
+            maxStep = Math.Max(maxStep, d);
+            if (d > 0) steps++;
+        }
+        output.WriteLine($"surface y range [{lo}, {hi}], max step {maxStep}, {steps} steps in 40000 columns");
+        Assert.True(maxStep <= 1, $"a {maxStep}-tile ledge is not a gentle hill");
+        Assert.InRange(hi - lo, 6, 30);          // it does roll, and stays low
+
+        // Every column: dirt for exactly ten tiles, then stone all the way down.
+        for (int cx = -40; cx <= 40; cx += 8)
+        {
+            int x = cx * Chunk.Size + 5;
+            int top = gen.SurfaceY(x);
+            for (int depth = 0; depth < 60; depth++)
+            {
+                int y = top + depth;
+                var c = new Chunk { ChunkPos = new Point(Math.DivRem(x, Chunk.Size, out _) - (x < 0 && x % Chunk.Size != 0 ? 1 : 0),
+                                                         (int)Math.Floor(y / (double)Chunk.Size)) };
+                gen.Generate(c);
+                var t = c.Tiles[x - c.ChunkPos.X * Chunk.Size, y - c.ChunkPos.Y * Chunk.Size];
+                Assert.Equal(TileState.Solid, t.State);
+                Assert.Equal(depth < 10 ? TileType.Dirt : TileType.Stone, t.Type);
+            }
+        }
+    }
 }

@@ -55,6 +55,15 @@ public class Game1 : Game
     // which is the desktop default.
     public string StageOverride { get; set; }
 
+    // Optional override of game_config's "SpawnSecondPlayer", same contract as
+    // StageOverride (set before Run()). The web host passes false so a solo browser
+    // game has no bot-driven P2; a networked match still forces the second player on.
+    public bool? SecondPlayerOverride { get; set; }
+
+    // Optional override of game_config's "BotOpponent" (which bot drives an offline
+    // second player), same contract again. The web lobby's "P2 AI" dropdown sets it.
+    public string BotOpponentOverride { get; set; }
+
     // Set (browser only) when the player asks to quit — Escape / gamepad Back.
     public bool ExitRequested { get; private set; }
 
@@ -386,6 +395,8 @@ public class Game1 : Game
 
         // A networked match always has two real players (local + remote), so force the
         // second player on regardless of config.
+        if (SecondPlayerOverride is bool second) _config.SpawnSecondPlayer = second;
+        if (!string.IsNullOrEmpty(BotOpponentOverride)) _config.BotOpponent = BotOpponentOverride;
         if (_net != null) _config.SpawnSecondPlayer = true;
 
         LoadStage(stage);
