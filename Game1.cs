@@ -158,6 +158,48 @@ public class Game1 : Game
     // camera transform's pivot. Consistent within a frame.
     private Vector2 _screenCenter;
 
+    // High-DPI. The host may supply a hook that switches the window's GL surface to
+    // physical pixels and returns the backing scale (MTile.Desktop/MacRetina.cs). The
+    // framework still thinks in points, so SyncHighDpi keeps the backbuffer at client
+    // size x scale; the camera zoom carries the same factor so framing is unchanged,
+    // mouse positions (still reported in points) are multiplied up before they meet the
+    // camera, and the HUD is drawn into a points-sized target and blitted (see Draw).
+    public static Func<float> HighDpiHook;
+    private float _dpiScale = 1f;
+    private Point _dpiClient;
+    private RenderTarget2D _hudTarget;
+    private RenderTarget2D _backdropTarget;
+
+    private void SyncHighDpi()
+    {
+        if (HighDpiHook == null || !_config.HighDpi) return;
+        var client = Window.ClientBounds.Size;
+        if (client.X <= 0 || client.Y <= 0) return;
+        if (client != _dpiClient)
+        {
+            _dpiClient = client;
+            float scale = MathF.Max(1f, HighDpiHook());
+            if (scale != _dpiScale)
+            {
+                if (!_creative.Active) _camera.Zoom = _camera.Zoom / _dpiScale * scale;
+                _dpiScale = scale;
+            }
+            if (_dpiScale != 1f)
+                Console.WriteLine($"[retina] backing scale {_dpiScale}: rendering "
+                    + $"{(int)MathF.Round(client.X * _dpiScale)}x{(int)MathF.Round(client.Y * _dpiScale)} "
+                    + $"for a {client.X}x{client.Y} window");
+        }
+        if (_dpiScale == 1f) return;
+        // Re-asserted every frame: the framework resets the backbuffer to the points
+        // size whenever the window reports a resize.
+        int w = (int)MathF.Round(client.X * _dpiScale), h = (int)MathF.Round(client.Y * _dpiScale);
+        var pp = GraphicsDevice.PresentationParameters;
+        if (pp.BackBufferWidth == w && pp.BackBufferHeight == h) return;
+        pp.BackBufferWidth = w;
+        pp.BackBufferHeight = h;
+        GraphicsDevice.Viewport = new Viewport(0, 0, w, h);
+    }
+
     // Screenshot capture (desktop dev tool) — F12 PNG grab + MTILE_SCREENSHOT headless
     // auto-capture, threaded through Initialize/Update/Draw. See ScreenshotSystem.
     private readonly ScreenshotSystem _screenshots = new();
@@ -284,6 +326,7 @@ public class Game1 : Game
     protected override void Initialize()
     {
         BootMark("Initialize start");
+        SyncHighDpi();
         _screenshots.Initialize();
 
         // Profiler slots, resolved once. Order here is the order they print in.
@@ -1045,7 +1088,7 @@ public class Game1 : Game
         if (_session == null && !_recorder.IsPlayback
             && keyboardState.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab))
         {
-            _creative.Toggle(_camera, _config.CameraZoom);
+            _creative.Toggle(_camera, _config.CameraZoom * _dpiScale);
             creativeToggled = true;
             Toast(_creative.Active ? "creative mode: sim frozen - Tab to play" : "play");
         }
@@ -1054,8 +1097,15 @@ public class Game1 : Game
             && keyboardState.IsKeyDown(Keys.S) && !_prevKeys.IsKeyDown(Keys.S);
         _prevKeys = keyboardState;
 
+        SyncHighDpi();
         var mouseState = Mouse.GetState();
-        _mouseScreen = mouseState.Position;
+        _mouseScreen = mouseState.Position;   // points: the HUD is laid out in points
+        if (_dpiScale != 1f)
+            // The OS reports the cursor in points; everything camera-side is in pixels.
+            mouseState = new MouseState(
+                (int)MathF.Round(mouseState.X * _dpiScale), (int)MathF.Round(mouseState.Y * _dpiScale),
+                mouseState.ScrollWheelValue, mouseState.LeftButton, mouseState.MiddleButton,
+                mouseState.RightButton, mouseState.XButton1, mouseState.XButton2);
         var viewport = GraphicsDevice.Viewport;
         _screenCenter = new Vector2(viewport.Width / 2f, viewport.Height / 2f);
         var mouseWorldPos = _camera.ScreenToWorld(mouseState.Position.ToVector2(), _screenCenter);
@@ -1248,12 +1298,38 @@ public class Game1 : Game
     {
         // Capture this frame to an offscreen target (if a screenshot is pending), so the
         // save is immune to window focus/occlusion. Null when nothing is being captured.
+        SyncHighDpi();
         RenderTarget2D shotTarget = _screenshots.BeginCapture(GraphicsDevice);
 
         GraphicsDevice.Clear(Color.Black);
 
         using (_prof.Measure(_sBackdrop))
-            _background?.Draw(_spriteBatch, _camera, _screenCenter);
+        {
+            if (_background != null && _dpiScale != 1f)
+            {
+                // The backdrops lay out in raw screen units (tree heights, strip sizes,
+                // scroll rates), so under high-DPI they draw into a points-sized layer
+                // with a points-space camera and are stretched over the frame — the same
+                // softness they had when the OS did the stretching.
+                if (_backdropTarget == null || _backdropTarget.Width != _dpiClient.X
+                                            || _backdropTarget.Height != _dpiClient.Y)
+                {
+                    _backdropTarget?.Dispose();
+                    _backdropTarget = new RenderTarget2D(GraphicsDevice, _dpiClient.X, _dpiClient.Y);
+                }
+                GraphicsDevice.SetRenderTarget(_backdropTarget);
+                GraphicsDevice.Clear(Color.Black);
+                float pixelZoom = _camera.Zoom;
+                _camera.Zoom = pixelZoom / _dpiScale;
+                _background.Draw(_spriteBatch, _camera, _screenCenter / _dpiScale);
+                _camera.Zoom = pixelZoom;
+                GraphicsDevice.SetRenderTarget(shotTarget);   // null = the backbuffer
+                _spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Opaque, SamplerState.LinearClamp);
+                _spriteBatch.Draw(_backdropTarget, GraphicsDevice.Viewport.Bounds, Color.White);
+                _spriteBatch.End();
+            }
+            else _background?.Draw(_spriteBatch, _camera, _screenCenter);
+        }
 
         _spriteBatch.Begin(transformMatrix: _camera.GetDrawTransform(_screenCenter));
 
@@ -1564,16 +1640,33 @@ public class Game1 : Game
         _prof.End(_sGlow, tGlow);
 
         long tHud = _prof.Begin();
+        // High-DPI: the HUD classes lay themselves out against GraphicsDevice.Viewport in
+        // raw screen units, so they draw into a points-sized target (where the viewport is
+        // what they have always seen) and that is stretched over the frame afterwards.
+        // The few world-space HUD draws get the camera scaled down to match.
+        bool hudScaled = _dpiScale != 1f;
+        var hudCam = camTransform;
+        if (hudScaled)
+        {
+            if (_hudTarget == null || _hudTarget.Width != _dpiClient.X || _hudTarget.Height != _dpiClient.Y)
+            {
+                _hudTarget?.Dispose();
+                _hudTarget = new RenderTarget2D(GraphicsDevice, _dpiClient.X, _dpiClient.Y);
+            }
+            GraphicsDevice.SetRenderTarget(_hudTarget);
+            GraphicsDevice.Clear(Color.Transparent);
+            hudCam = camTransform * Matrix.CreateScale(1f / _dpiScale, 1f / _dpiScale, 1f);
+        }
         _hud.Draw(LocalPlayer, LocalAnimator, _mouseScreen, OtherPlayers(), _config.ShowDebugText);
         _bossBars.Draw(_spriteBatch, _debugFont, _pixel, GraphicsDevice.Viewport, _sim.Entities,
                        (float)gameTime.ElapsedGameTime.TotalSeconds);
         if (string.Equals(_activeStage, "depths", StringComparison.OrdinalIgnoreCase))
             _depthsHud.Draw(_spriteBatch, _debugFont, GraphicsDevice.Viewport, _sim);
         if (_config.DrawFighterNames)
-            FightHud.DrawNameLabels(_spriteBatch, _debugFont, camTransform, _sim.Entities);
+            FightHud.DrawNameLabels(_spriteBatch, _debugFont, hudCam, _sim.Entities);
         if (_fight != null)
         {
-            FightHud.DrawWorld(_spriteBatch, _pixel, camTransform, _fightBots);
+            FightHud.DrawWorld(_spriteBatch, _pixel, hudCam, _fightBots);
             FightHud.Draw(_spriteBatch, _debugFont, _pixel, GraphicsDevice.Viewport, _fight, _fightBots, _sim,
                           _recorder.IsRecording);
         }
@@ -1599,7 +1692,10 @@ public class Game1 : Game
         }
         if (_creative.Active)
         {
-            _creative.DrawWorld(_spriteBatch, _pixel, _camera, _screenCenter);
+            float pixelZoom = _camera.Zoom;
+            _camera.Zoom = pixelZoom / _dpiScale;
+            _creative.DrawWorld(_spriteBatch, _pixel, _camera, _screenCenter / _dpiScale);
+            _camera.Zoom = pixelZoom;
             _creative.DrawHud(_spriteBatch, _debugFont, _pixel, GraphicsDevice.Viewport.Width);
         }
         _prof.End(_sHud, tHud);
@@ -1639,6 +1735,14 @@ public class Game1 : Game
             _spriteBatch.Begin();
             _spriteBatch.DrawString(_debugFont, _netAlert, pos + new Vector2(1, 1), Color.Black);
             _spriteBatch.DrawString(_debugFont, _netAlert, pos, _netAlertColor);
+            _spriteBatch.End();
+        }
+
+        if (hudScaled)
+        {
+            GraphicsDevice.SetRenderTarget(shotTarget);   // null = the backbuffer
+            _spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp);
+            _spriteBatch.Draw(_hudTarget, GraphicsDevice.Viewport.Bounds, Color.White);
             _spriteBatch.End();
         }
 

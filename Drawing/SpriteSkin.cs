@@ -148,7 +148,7 @@ public sealed class SpriteSkin : IDisposable
             if (texture == null)
                 throw new InvalidOperationException("SpriteSkin: binding has no Image and no layers.");
             var all = new SpriteSkinLayer { Name = "all" };   // no Bones → every bone
-            BuildLayer(doc, all, texture, ownsLayerTexture: false, pixels, w, h, Point.Zero, step, thresh);
+            BuildLayer(doc, all, CreateMipped(gd, pixels, w, h), ownsLayerTexture: true, pixels, w, h, Point.Zero, step, thresh);
         }
         else
         {
@@ -168,7 +168,8 @@ public sealed class SpriteSkin : IDisposable
                     layerTex.GetData(lpx);
                     for (int i = 0; i < lpx.Length; i++)
                         lpx[i] = Color.FromNonPremultiplied(lpx[i].R, lpx[i].G, lpx[i].B, lpx[i].A);
-                    layerTex.SetData(lpx);
+                    layerTex.Dispose();
+                    layerTex = CreateMipped(gd, lpx, lw, lh);
                     BuildLayer(doc, spec, layerTex, ownsLayerTexture: true, lpx, lw, lh,
                                new Point(spec.OffsetX, spec.OffsetY), step, thresh);
                     continue;
@@ -191,8 +192,7 @@ public sealed class SpriteSkin : IDisposable
                                       "(mask color unused?) — skipped.");
                     continue;
                 }
-                var carvedTex = new Texture2D(gd, w, h);
-                carvedTex.SetData(masked);
+                var carvedTex = CreateMipped(gd, masked, w, h);
                 BuildLayer(doc, spec, carvedTex, ownsLayerTexture: true, masked, w, h, Point.Zero, step, thresh);
             }
             if (_layers.Count == 0)
@@ -207,6 +207,56 @@ public sealed class SpriteSkin : IDisposable
             World              = Matrix.Identity,
             View               = Matrix.Identity,
         };
+    }
+
+    // A texture with a full box-filtered mip chain built from PREMULTIPLIED pixels
+    // (filtering straight alpha would bleed the transparent texels' colour into the
+    // edges). The art is authored well above its on-screen size — at the default zoom a
+    // source texel covers under half a screen pixel — and bilinear alone reads only a
+    // 2x2 block, so without mips thin outlines drop texels and shimmer in motion.
+    // LinearClamp is trilinear once the levels exist. The image sits in the top-left of
+    // a canvas padded out to power-of-two sides (transparent fill): the Reach profile
+    // the browser build runs under (WebGL1) cannot mip anything else. So the texture is
+    // LARGER than (w, h), and BuildLayer divides its UVs by the texture's size.
+    private static Texture2D CreateMipped(GraphicsDevice gd, Color[] pixels, int w, int h)
+    {
+        int pw = 1, ph = 1;
+        while (pw < w) pw <<= 1;
+        while (ph < h) ph <<= 1;
+        var src = pixels;
+        if (pw != w || ph != h)
+        {
+            src = new Color[pw * ph];
+            for (int y = 0; y < h; y++)
+                Array.Copy(pixels, y * w, src, y * pw, w);
+        }
+
+        var tex = new Texture2D(gd, pw, ph, true, SurfaceFormat.Color);
+        tex.SetData(0, null, src, 0, pw * ph);
+        int sw = pw, sh = ph;
+        for (int level = 1; level < tex.LevelCount; level++)
+        {
+            int dw = Math.Max(1, sw / 2), dh = Math.Max(1, sh / 2);
+            var dst = new Color[dw * dh];
+            for (int y = 0; y < dh; y++)
+            {
+                int y0 = Math.Min(y * 2, sh - 1), y1 = Math.Min(y * 2 + 1, sh - 1);
+                for (int x = 0; x < dw; x++)
+                {
+                    int x0 = Math.Min(x * 2, sw - 1), x1 = Math.Min(x * 2 + 1, sw - 1);
+                    Color a = src[y0 * sw + x0], b = src[y0 * sw + x1],
+                          c = src[y1 * sw + x0], d = src[y1 * sw + x1];
+                    dst[y * dw + x] = new Color(
+                        (byte)((a.R + b.R + c.R + d.R + 2) / 4),
+                        (byte)((a.G + b.G + c.G + d.G + 2) / 4),
+                        (byte)((a.B + b.B + c.B + d.B + 2) / 4),
+                        (byte)((a.A + b.A + c.A + d.A + 2) / 4));
+                }
+            }
+            tex.SetData(level, null, dst, 0, dst.Length);
+            src = dst; sw = dw; sh = dh;
+        }
+        return tex;
     }
 
     // Per-pixel layer index from the color-coded mask: each opaque sprite pixel goes to
@@ -341,7 +391,8 @@ public sealed class SpriteSkin : IDisposable
         for (int i = 0; i < positions.Count; i++)
         {
             layer.Verts[i].Color = vertColor;
-            layer.Verts[i].TextureCoordinate = new Vector2(positions[i].X / w, positions[i].Y / h);
+            layer.Verts[i].TextureCoordinate = new Vector2(positions[i].X / layerTex.Width,
+                                                             positions[i].Y / layerTex.Height);   // padded — see CreateMipped
             restRig[i] = doc.ImageToRig(positions[i] + offset.ToVector2());
         }
 

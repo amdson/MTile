@@ -14,6 +14,8 @@ using MTile.Rtc;
 // server URLs as extra args for internet NAT traversal; the default Google STUN works
 // for most setups, and LAN/loopback connects even without it.
 
+Game1.HighDpiHook = MTile.Desktop.MacRetina.Enable;
+
 string mode = args.Length > 0 ? args[0].ToLowerInvariant() : "solo";
 
 if (mode == "--fight")

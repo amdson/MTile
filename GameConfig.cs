@@ -14,6 +14,10 @@ public sealed class GameConfig
     public int    WindowWidth  { get; set; } = 1600;
     public int    WindowHeight { get; set; } = 1200;
     public bool   Fullscreen   { get; set; } = false;
+    // Render at the display's physical pixels on a high-DPI (Retina) screen instead of
+    // letting the OS stretch a points-sized frame. Only takes effect where the host
+    // supplies Game1.HighDpiHook (macOS desktop today); a no-op everywhere else.
+    public bool   HighDpi      { get; set; } = true;
 
     // Debug-overlay toggles. Defaults match the historical inline values in Game1
     // so a missing/old config behaves identically to before.

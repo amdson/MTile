@@ -757,6 +757,9 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
     private void BuildStrips(SpriteBatch sb, int screenH)
     {
         Dispose();
+        // Draw may itself be running inside an offscreen target (screenshot capture, the
+        // high-DPI backdrop layer) — put that back afterwards, not the backbuffer.
+        var outerTargets = _device.GetRenderTargets();
         _strips = new RenderTarget2D[_layers.Length];
         _builtScreenH = screenH;
         // Bake-only scratch (freed below): one grey twin per tree species.
@@ -868,7 +871,7 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
         }
         // Backbuffer contents are undefined after the target swap, but Draw floods
         // the full screen with sky right after.
-        _device.SetRenderTarget(null);
+        _device.SetRenderTargets(outerTargets);
         foreach (var g in greys) g.Dispose();
     }
 
