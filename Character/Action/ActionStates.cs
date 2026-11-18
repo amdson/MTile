@@ -669,6 +669,8 @@ public abstract class SlashLikeAction : ActionState
     // is a good part of why the light slashes read as hitting a beach ball. The floor
     // is here so a connect is never a dead touch, not so a poke is a launch.
     private   const   float    SlashMinLaunch      = 100f;   // default for MinLaunch below
+    // Swing speed of the ground pokes (S1/S2), px/s - see GroundSlash1.StrikeSpeed.
+    protected const   float    PokeStrikeSpeed     = 310f;
 
     // ----- per-variant knobs ------------------------------------------------
     protected abstract float   Duration            { get; }   // seconds
@@ -1019,6 +1021,11 @@ public class GroundSlash1 : SlashLikeAction
     protected override float SweepAngleDeg       => 100f;
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 60f; 
+    // A real swing (2026-11-18; was the default 1, a leftover from the hold-slash days, so
+    // the 100 launch floor was the whole knockback and a victim walking in absorbed it).
+    // 310 leaves a walker (-60) at about +150 after KnockbackSpeedScale: above walk speed,
+    // so the feet slip (MOVEMENT_RESOURCE_MODEL 9) and the advance is interrupted.
+    protected override float StrikeSpeed         => PokeStrikeSpeed;
     protected override Color SlashColor          => Color.Red;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -1052,6 +1059,7 @@ public class GroundSlash2 : SlashLikeAction
     protected override float SweepAngleDeg       => 110f;
     protected override float SweepDirection      => -1f;
     protected override float KnockbackMagnitude  => 40f;  
+    protected override float StrikeSpeed         => PokeStrikeSpeed;
     protected override Color SlashColor          => Color.Red;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
