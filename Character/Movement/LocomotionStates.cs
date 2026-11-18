@@ -226,14 +226,18 @@ public class DropdownState : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (!ctx.Input.Down) return false;
-        if (!ctx.TryGetGround(out _)) return false;
+        if (!ctx.Legs) return false;
         return TryPickDropDir(ctx, out _, out _);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (!ctx.Input.Down) return false;
-        if (!ctx.TryGetGround(out _)) { vars.ExitingAirborne = true; return false; }   // body's airborne ⇒ Falling takes over
+        // Airborne = the Legs probe gone, the SAME test Standing is gated on. The old
+        // strip probe (TryGetGround) lost the floor while the hull's C-space floor
+        // envelope still had the corner in leg reach, so Dropdown ended, Standing
+        // (not Falling) took over and its legs pushed the body back up onto the lip.
+        if (!ctx.Legs) { vars.ExitingAirborne = true; return false; }   // ⇒ Falling takes over
         return vars.SlideTime < MovementConfig.Current.MaxDropdownTime;
     }
 
