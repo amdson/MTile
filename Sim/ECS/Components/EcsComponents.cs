@@ -226,6 +226,9 @@ public struct EntityData
     public bool     Tracking;     // ball: still following the point (gravity off, no hurtbox)
     public int      HarvestBlocks;// ball: blocks at break-out (Budget is what's left)
     public int      ChargedBlocks;// ball: how many of those were charged tiles (blast scaling)
+    public bool     ContactPending; // ball: its sensor touched something (IContactSensor) — burst next update
+    public bool     ContactBody;    // ball: …and it was a body, not terrain
+    public Vector2  ContactVelocity;// ball: velocity at the touch (aims the core hit)
     public float    CarryTime;    // ball: seconds held while the point was driven (dissipation clock)
     public float    ChaseTime;    // ball: seconds chasing a released point (detach cap)
 }

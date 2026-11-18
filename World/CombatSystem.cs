@@ -128,6 +128,9 @@ public sealed class CombatSystem
         {
             _liveHitIds.Add(hit.HitId);
 
+            // Sensors report and do nothing else — no dedupe entry, no effects.
+            if (hit.Sensor) { Sense(in hit, chunks, hurtboxes, resolve); continue; }
+
             // Narrow-phase polygon shape — compute world-space vertices + edge axes
             // once per hitbox, reused across all tile / entity overlap checks.
             Vector2[] hitVerts = null;
@@ -307,6 +310,155 @@ public sealed class CombatSystem
             if (!_liveHitIds.Contains(k) && !_heldHitIds.Contains(k)) _scratchPrune.Add(k);
         foreach (var k in _scratchPrune) _hitDedupe.Remove(k);
         _heldHitIds.Clear();
+    }
+
+    // ── Sensors (Hitbox.Sensor) ─────────────────────────────────────────────────
+    // Earliest touch of the hitbox swept along Sweep, against Solid cells and against the
+    // hurtboxes the hitbox could hit, delivered to the Source's IContactSensor. The swept
+    // shape is the hitbox's polygon Shape when it has one (a rounded sensor is a regular
+    // polygon, as the slashes' arcs are), else its Region box. Two rules keep a sensor
+    // from firing on terrain it is leaving or tunnelling out of:
+    //   • behind the motion — a cell the shape ALREADY overlaps at t = 0 counts only if
+    //     its nearest point lies ahead of the sweep (a clod lifted off a floor and thrown
+    //     away from it doesn't touch that floor); with no sweep, any overlap counts.
+    //   • buried — a touch at a moment the shape's CENTER is inside a Solid cell doesn't
+    //     count, so something released inside rock flies out instead of stopping in it;
+    //     the rock it exits is then behind it.
+    // Only Solid is terrain here, as in the tile path (sprouts and spikes aren't).
+    // Touching (shared edge) is not overlap. Ties keep the first found: cells in
+    // ascending gtx/gty order, then hurtboxes in publish order — deterministic.
+    private readonly Vector2[] _sensorBox = new Vector2[4];
+    private static readonly Vector2[] BoxAxes = { Vector2.UnitX, Vector2.UnitY };
+
+    private void Sense(in Hitbox hit, ChunkMap chunks, HurtboxWorld hurtboxes,
+                       Func<EntityId, IHittable> resolve)
+    {
+        if (resolve(hit.Source) is not IContactSensor sensor) return;
+
+        var r = hit.Region;
+        var d = hit.Sweep;
+        bool moving = d.LengthSquared() > 1e-8f;
+
+        Vector2[] verts, axes;
+        Vector2 c0;
+        if (hit.Shape != null)
+        {
+            verts = hit.Shape.GetVertices(hit.ShapePos, hit.ShapeRotation);
+            axes  = hit.Shape.GetAxes(verts);
+            c0    = hit.ShapePos;
+        }
+        else
+        {
+            _sensorBox[0] = new Vector2(r.Left,  r.Top);
+            _sensorBox[1] = new Vector2(r.Right, r.Top);
+            _sensorBox[2] = new Vector2(r.Right, r.Bottom);
+            _sensorBox[3] = new Vector2(r.Left,  r.Bottom);
+            verts = _sensorBox;
+            axes  = BoxAxes;
+            c0    = new Vector2((r.Left + r.Right) * 0.5f, (r.Top + r.Bottom) * 0.5f);
+        }
+
+        bool     found  = false;
+        float    bestT  = float.MaxValue;
+        Vector2  bestN  = default;
+        EntityId bestId = EntityId.None;
+
+        if (hit.Targets != HitTargets.EntitiesOnly && chunks != null)
+        {
+            float ts = Chunk.TileSize;
+            int gx0 = (int)MathF.Floor(MathF.Min(r.Left,   r.Left   + d.X) / ts);
+            int gx1 = (int)MathF.Floor(MathF.Max(r.Right,  r.Right  + d.X) / ts);
+            int gy0 = (int)MathF.Floor(MathF.Min(r.Top,    r.Top    + d.Y) / ts);
+            int gy1 = (int)MathF.Floor(MathF.Max(r.Bottom, r.Bottom + d.Y) / ts);
+            for (int gx = gx0; gx <= gx1; gx++)
+            for (int gy = gy0; gy <= gy1; gy++)
+            {
+                if (chunks.GetCellState(gx, gy) != TileState.Solid) continue;
+                var cell = new BoundingBox(gx * ts, gy * ts, (gx + 1) * ts, (gy + 1) * ts);
+                if (!SweptEntry(verts, axes, d, cell, out float t, out var n)) continue;
+                if (t >= bestT) continue;
+                if (t <= 0f && moving)
+                {
+                    var near = new Vector2(Math.Clamp(c0.X, cell.Left, cell.Right),
+                                           Math.Clamp(c0.Y, cell.Top,  cell.Bottom));
+                    if (Vector2.Dot(near - c0, d) <= 0f) continue;            // behind
+                }
+                var at = c0 + d * t;
+                if (chunks.GetCellState((int)MathF.Floor(at.X / ts),
+                                        (int)MathF.Floor(at.Y / ts)) == TileState.Solid) continue;   // buried
+                found = true; bestT = t; bestN = n; bestId = EntityId.None;
+            }
+        }
+
+        if (hit.Targets != HitTargets.TilesOnly && hurtboxes != null)
+        {
+            foreach (var hb in hurtboxes.All)
+            {
+                if (hb.Target == hit.Source) continue;
+                if (hit.Owner == hb.Owner && !AcrossTeams(in hit, in hb, resolve)) continue;
+                if (Coop && Factions.IsPlayer(hit.Owner) && Factions.IsPlayer(hb.Owner)) continue;
+                if (!SweptEntry(verts, axes, d, hb.Region, out float t, out var n)) continue;
+                if (t >= bestT) continue;
+                found = true; bestT = t; bestN = n; bestId = hb.Target;
+            }
+        }
+
+        if (found) sensor.OnSensorContact(in hit, new SensorContact(bestT, c0 + d * bestT, bestN, bestId));
+    }
+
+    // When does a convex shape (world vertices `verts`, edge normals `axes`) moving by `d`
+    // over t ∈ [0,1] first overlap the box `target`? Swept SAT: on every separating axis
+    // candidate (the shape's edge normals plus the box's x/y) the projections overlap
+    // over some t-interval; the shapes overlap where all of those intervals do. t is
+    // clamped to 0 for a starting overlap. `n` points out of the target: the axis whose
+    // interval opened last, or for a starting overlap the shallowest penetration.
+    private static bool SweptEntry(Vector2[] verts, Vector2[] axes, Vector2 d, BoundingBox target,
+                                   out float t, out Vector2 n)
+    {
+        t = 0f; n = default;
+        float tIn = float.NegativeInfinity, tOut = float.PositiveInfinity;
+        Vector2 inAxis = default;
+        float   pen = float.MaxValue;
+        Vector2 penN = default;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            var list = pass == 0 ? axes : BoxAxes;
+            foreach (var ax in list)
+            {
+                var (aMin, aMax) = Polygon.Project(verts, ax);
+                float c1 = target.Left  * ax.X + target.Top    * ax.Y;
+                float c2 = target.Right * ax.X + target.Top    * ax.Y;
+                float c3 = target.Right * ax.X + target.Bottom * ax.Y;
+                float c4 = target.Left  * ax.X + target.Bottom * ax.Y;
+                float bMin = MathF.Min(MathF.Min(c1, c2), MathF.Min(c3, c4));
+                float bMax = MathF.Max(MathF.Max(c1, c2), MathF.Max(c3, c4));
+                float s = Vector2.Dot(d, ax);
+
+                float lo, hi;
+                if (MathF.Abs(s) < 1e-6f)
+                {
+                    if (aMin >= bMax || aMax <= bMin) return false;   // never overlaps on this axis
+                    lo = float.NegativeInfinity; hi = float.PositiveInfinity;
+                }
+                else
+                {
+                    float t1 = (bMin - aMax) / s, t2 = (bMax - aMin) / s;
+                    lo = MathF.Min(t1, t2); hi = MathF.Max(t1, t2);
+                }
+                if (lo > tIn) { tIn = lo; inAxis = s > 0f ? -ax : ax; }
+                if (hi < tOut) tOut = hi;
+                if (tIn >= tOut) return false;
+
+                // Starting-overlap penetration on this axis (only meaningful if t=0 overlaps).
+                float pMin = aMax - bMin, pMax = bMax - aMin;
+                if (pMin < pen) { pen = pMin; penN = -ax; }
+                if (pMax < pen) { pen = pMax; penN =  ax; }
+            }
+        }
+        if (tOut <= 0f || tIn > 1f) return false;
+        if (tIn > 0f) { t = tIn; n = inAxis; }
+        else          { t = 0f;  n = penN;   }
+        return true;
     }
 
     // ── Clank (todo.txt D) ──────────────────────────────────────────────────────

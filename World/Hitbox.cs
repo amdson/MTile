@@ -184,6 +184,17 @@ public readonly struct Hitbox
     // Restitution the launched victim meets terrain with (Launch.Bounce); 0 = the body's
     // own. A launcher that wants its wall / floor slam to pop the victim back out sets it.
     public readonly float       LaunchBounce;
+    // ── Sensor (World/SensorContact.cs) ─────────────────────────────────────────
+    // A sensor hitbox does nothing to what it touches: no damage, knockback, recoil,
+    // dedupe or hit-confirm. CombatSystem instead finds the EARLIEST point along
+    // Region + t·Sweep (t ∈ [0,1]) where it touches a Solid cell or a hurtbox the same
+    // hitbox could hit (Targets, faction, team and co-op gates apply), and hands that to
+    // its Source entity (IContactSensor) during Apply — before the physics step, so the
+    // owner can stop at the contact instead of being moved through it. Sweep is the
+    // displacement the owner is about to make this frame (velocity·dt); it is read only
+    // for sensors.
+    public readonly Vector2     Sweep;
+    public readonly bool        Sensor;
 
     // Input cheat-sheet (details on the fields above):
     //   Identity   region (broad AABB) · hitId (dedupe key) · owner/source · targets
@@ -205,6 +216,7 @@ public readonly struct Hitbox
     //   Soft hit   tileMaxMaterialHP (0 = off; tiles tougher than this are skipped)
     //   Tile impact tileImpact (0 = off; one crater's worth of HP per attack, on contact)
     //   Clank      clank (None = passes through other attacks; Blade/Blunt = melee)
+    //   Sensor     sensor (report first contact to Source, no effects) · sweep (this frame's travel)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
                   Color? debugColor = null, HitTargets targets = HitTargets.All,
@@ -227,8 +239,12 @@ public readonly struct Hitbox
                   float launchBounce = 0f,
                   float hitstopSecondsOverride = -1f,
                   float tileMaxMaterialHP = 0f,
-                  float tileImpact = 0f)
+                  float tileImpact = 0f,
+                  Vector2 sweep = default,
+                  bool sensor = false)
     {
+        Sweep                = sweep;
+        Sensor               = sensor;
         TileImpact           = tileImpact;
         TileMaxMaterialHP    = tileMaxMaterialHP;
         Clank                = clank;

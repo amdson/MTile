@@ -6,9 +6,19 @@ namespace MTile;
 // Roadmap §4.3 — ballistic projectile launched by LobbedAreaAction with a
 // charge-time-derived budget, and (Plans/BLOCK_THROW_PLAN.md) the thrown clod of a
 // block grab. It bursts on either of two fuses — touching a body it can hurt, or
-// touching terrain (the solver's contact impulse, NOT a settled-to-a-stop test: the
-// clod breaks where it strikes, and a lob can't self-detonate at its apex) — and the
-// burst is the same either way:
+// touching terrain — and the burst is the same either way.
+//
+// NO TERRAIN PHYSICS (2026-11-16). The clod is a sensor, not a collider: Body.IgnoreTiles
+// is always on, and every frame it publishes a SENSOR hitbox shaped like the drawn orb (a 12-gon),
+// swept over the travel it is about to make (Hitbox.Sensor). CombatSystem reports the
+// first terrain or body it touches back through IContactSensor during Apply; a terrain
+// touch pins the clod at the contact (before physics moves it on), and the next update
+// bursts. A body touch leaves it flying, so it bursts inside the body it reached — the
+// core hit's center. It used to collide through the solver on a 5 px disc and burst on the
+// contact impulse, which had two visible faults: the drawn orb (up to ~11 px, a whole
+// tile) sank half a tile into the face before the disc touched, and only the
+// face-normal component of the hit counted, so a glancing throw skidded along a floor
+// and burst wherever it slowed down. The burst itself:
 //   1. Its whole budget is injected into TileMassField at the burst cell, and the
 //      spill cascade grows the "splash" mound outward from there. This used to call
 //      EruptionPlanner.Plan with a single zero-velocity sample; the mass field reaches
@@ -23,10 +33,8 @@ namespace MTile;
 // were, following its PullPointEntity with a critically damped, speed-capped tracker —
 // the same code whether the point is still in the player's hand or already flying
 // after release. While tracking: gravity off, no hurtbox, and the budget bleeds while
-// the point is held. Tiles are OFF while the clod is in hand (2026-11-10: a held clod
-// that collided kept snagging on the terrain it was dragged through) and come on after
-// release once the clod's center is out of solid — see TerrainTransparent. Terrain contact
-// never bursts a HELD clod, but touching a body it can hurt does — the same burst a
+// the point is held. Terrain contact never bursts a HELD clod (it passes through what
+// it is dragged across), but touching a body it can hurt does — the same burst a
 // thrown one makes (the held fuse in Track). The tracker
 // writes only Body.Velocity; PhysicsWorld integrates the position. Once the point has
 // been released the ball DETACHES when its velocity has converged to the point's (or
@@ -39,23 +47,12 @@ namespace MTile;
 // The deposit needs a ChunkMap reference, which Entity.Update doesn't normally surface.
 // We grab it through ctx.Spawner.Chunks via an extra hook on IEntitySpawner — adding
 // the property keeps the entity sandbox clean (no static ChunkMap reach-arounds).
-public class LobbedAreaProjectile : Projectile
+public class LobbedAreaProjectile : Projectile, IContactSensor
 {
     private const float LifeSeconds       = 5.0f;
-    // Float-noise rejection: the solver leaves LastImpulseMagnitude at exactly 0 on a
-    // step with no terrain contact at all.
-    private const float ContactImpulseEps = 0.01f;
-    // A contact this hard is a STRIKE, not weight. A clod merely resting or sliding on
-    // terrain absorbs one frame of gravity per step — 600·(1/60) = 10 px/s, measured —
-    // while a thrown one arrives carrying its whole throw speed, a few hundred. Sitting
-    // safely above the resting figure is what lets the fuse fire on a wall the clod was
-    // already scraping along without firing on the ground it was lifted off.
-    private const float StrikeImpulse     = 45f;
-    // "Effectively stopped": a clod that touched down gently never reaches StrikeImpulse,
-    // so this is the second way to burst — it has arrived rather than been hit. Also
-    // picks the core hit's knockback direction.
+    // Below this speed the core hit pops upward instead of along the (meaningless)
+    // direction of travel.
     private const float StillSpeed        = 30f;
-    private const float ArmDelay          = 0.04f;
     private const float ExplosionRadius   = 48f;   // px, tile-size independent
     private const int   ExplosionSegments = 10;
     private const float SegmentHalfSize   = 9f;
@@ -123,6 +120,10 @@ public class LobbedAreaProjectile : Projectile
     private int      _charged;
     private float    _carryTime;
     private float    _chaseTime;
+    // Sensor contact (OnSensorContact) awaiting its burst on the next update.
+    private bool     _contactPending;
+    private bool     _contactBody;
+    private Vector2  _contactVel;
 
     public override EntityKind Kind => EntityKind.LobbedArea;
 
@@ -134,6 +135,8 @@ public class LobbedAreaProjectile : Projectile
     public TileType TileType      => _tileType;
     // Has this clod burst? Read-only, for tests and probes.
     public bool     Detonated     => _detonated;
+    // Touched something and bursts on the next update (pinned at the face if terrain).
+    public bool     ContactPending => _contactPending;
 
     // hitId/tileType are immutable (ctor) — recorded so Rehydrate can reconstruct via
     // the ctor. Budget bleeds during a carry; the tracking fields are per-frame state.
@@ -150,6 +153,9 @@ public class LobbedAreaProjectile : Projectile
         s.ChargedBlocks = _charged;
         s.CarryTime     = _carryTime;
         s.ChaseTime     = _chaseTime;
+        s.ContactPending  = _contactPending;
+        s.ContactBody     = _contactBody;
+        s.ContactVelocity = _contactVel;
     }
 
     protected override void ReadState(in EntityData s)
@@ -163,6 +169,9 @@ public class LobbedAreaProjectile : Projectile
         _charged   = s.ChargedBlocks;
         _carryTime = s.CarryTime;
         _chaseTime = s.ChaseTime;
+        _contactPending = s.ContactPending;
+        _contactBody    = s.ContactBody;
+        _contactVel     = s.ContactVelocity;
     }
 
     public LobbedAreaProjectile(Vector2 pos, Vector2 launchVelocity, int budget, TileType tileType, int hitId, Faction owner)
@@ -203,75 +212,81 @@ public class LobbedAreaProjectile : Projectile
 
     protected override void ProjectileUpdate(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
     {
-        // Re-derived every frame (before this step's physics) from snapshotted state and
-        // the terrain, so it needs no snapshot field of its own.
-        Body.IgnoreTiles = TerrainTransparent(spawner);
-        if (_tracking) { Track(dt, hitboxes, spawner); return; }
-
+        // Never a terrain collider (see the header). Set every frame rather than once so
+        // no rehydrate or body-reset path can quietly hand the solver back.
+        Body.IgnoreTiles = true;
         if (_detonated) { Health = 0f; return; }
-        // The arm delay guards only the SETTLE fuse (a dropped clod must not read as
-        // "landed" on its first free frame). A hard strike stays live through it: the
-        // strike impulse is visible for exactly one frame, so a clod that detached
-        // near a wall and hit inside the delay used to lose it and drop to the floor.
-        if (Age < ArmDelay)
+
+        // Last frame's sensor touched something: burst here. A terrain touch already
+        // pinned the body at the face; the velocity it arrived with aims the core hit.
+        // A tracking clod detaches first, so the point and the action see it leave the
+        // hand this frame (the point dies, the action ends and hands off).
+        if (_contactPending)
         {
-            if (TerrainStruck(settleCounts: false)) Detonate(hitboxes, spawner, bodyHit: false);
+            _contactPending = false;
+            if (_tracking) Detach();
+            Body.Velocity = _contactVel;
+            Detonate(hitboxes, spawner, bodyHit: _contactBody);
+            Body.Velocity = Vector2.Zero;
             return;
         }
 
-        // Fuse 1 — contact. A thrown clod bursts on the first body it touches instead
-        // of sailing through it to land somewhere behind. Hurtboxes are published
-        // before the entity pass, so this is the current frame's set (Simulation.Step).
-        if (TouchesBody(spawner?.Hurtboxes)) { Detonate(hitboxes, spawner, bodyHit: true); return; }
-
-        // Fuse 2 — terrain. In free flight a clod bursts on a hard contact OR once it
-        // has come to rest against terrain (a gentle set-down never strikes hard).
-        if (TerrainStruck(settleCounts: true)) Detonate(hitboxes, spawner, bodyHit: false);
-    }
-
-    // Is any body we're allowed to hurt inside the clod right now? Measured on the
-    // DRAWN radius, not the small collision disc, so the burst fires when the orb
-    // visibly meets the target. Own faction is excluded, so a thrower can't set off
-    // their own throw (and two clods of one player pass through each other).
-    //
-    // `coop` (held fuse only) also skips other players' bodies in a co-op match, where
-    // the burst could never hurt them anyway (CombatSystem.Coop) — so carrying a clod
-    // past a teammate doesn't waste it. The thrown fuses keep the plain faction test.
-    private bool TouchesBody(HurtboxWorld hurtboxes, bool coop = false)
-    {
-        if (hurtboxes == null) return false;
-        float r = DrawRadius;
-        var p = Body.Position;
-        var region = new BoundingBox(p.X - r, p.Y - r, p.X + r, p.Y + r);
-        foreach (var hb in hurtboxes.Overlapping(region, exclude: Faction))
+        bool held = false;
+        if (_tracking)
         {
-            if (hb.Target == Id) continue;
-            if (coop && Factions.IsPlayer(Faction) && Factions.IsPlayer(hb.Owner)) continue;
-            return true;
+            held = Track(dt, spawner);
+            if (Health <= 0f) return;
         }
-        return false;
+        PublishSensor(dt, hitboxes, held);
     }
 
-    // Did terrain just hit us, and hard enough to break the clod? PhysicsWorld reports
-    // the normal velocity it had to absorb at every contact during the last StepSwept,
-    // so this reads both "was I touching something solid" and "how hard". Entities
-    // update before the physics step, so it is the previous step's contact: one frame
-    // of lag, and still far earlier than waiting for the thing to stop moving.
-    //
-    // Both paths require an ACTUAL contact, which is why this can't misfire the way the
-    // velocity-halt heuristic it replaced did — that one also read "landed" at the apex
-    // of a high lob, where speed passes through zero in open air.
-    //
-    // `settleCounts` is off during the post-release chase: a clod there is slow because
-    // it hasn't been accelerated up to throw speed yet, not because it has arrived, and
-    // one grabbed off the floor is often still touching the floor at that moment. Only
-    // a real strike breaks it mid-chase.
-    private bool TerrainStruck(bool settleCounts)
+    // The fuse: a sensor shaped like the drawn orb, swept over the travel the physics
+    // step is about to make (so even a small, fast clod can't skip a tile or a body).
+    // CombatSystem applies the faction / team / co-op gates, so a thrower never sets off
+    // their own throw and a clod passes a co-op teammate. A HELD clod senses bodies only
+    // — it scrapes through terrain while the player is still aiming it; thrown (chasing
+    // or free) it senses both.
+    private void PublishSensor(float dt, HitboxWorld hitboxes, bool held)
     {
-        float impulse = Body.LastImpulseMagnitude;
-        if (impulse <= ContactImpulseEps) return false;
-        return impulse >= StrikeImpulse
-            || (settleCounts && Body.Velocity.LengthSquared() < StillSpeed * StillSpeed);
+        if (hitboxes == null) return;
+        float r = DrawRadius;
+        var   p = Body.Position;
+        // The orb's outline: a regular polygon on the drawn radius (vertices at the
+        // compass points, so it reaches exactly r straight down/up/sideways). Rebuilt
+        // only when the radius changes; derived from the budget, so not snapshot state.
+        if (_sensorShape == null || _sensorShapeRadius != r)
+        {
+            _sensorShape       = Polygon.CreateRegular(r, SensorSides);
+            _sensorShapeRadius = r;
+        }
+        hitboxes.Publish(new Hitbox(
+            new BoundingBox(p.X - r, p.Y - r, p.X + r, p.Y + r),
+            _hitId, 0f, Vector2.Zero, Faction, Id, Color.Sienna,
+            targets:  held ? HitTargets.EntitiesOnly : HitTargets.All,
+            shape:    _sensorShape,
+            shapePos: p,
+            sweep:    Body.Velocity * dt,
+            sensor:   true));
+    }
+
+    private const int SensorSides = 12;
+    private Polygon _sensorShape;
+    private float   _sensorShapeRadius;
+
+    // CombatSystem, mid-Apply. Only state changes here; the burst publishes its hitboxes
+    // on the next update. Terrain pins the clod at the contact so it never shows past
+    // the face; a body touch keeps it flying into the body it reached.
+    public void OnSensorContact(in Hitbox sensor, in SensorContact contact)
+    {
+        if (_detonated || _contactPending) return;
+        _contactPending = true;
+        _contactBody    = !contact.IsTerrain;
+        _contactVel     = Body.Velocity;
+        if (contact.IsTerrain)
+        {
+            Body.Position = contact.Center;
+            Body.Velocity = Vector2.Zero;
+        }
     }
 
     // The burst, shared by both fuses so a clod that hits a player reads the same as
@@ -386,11 +401,12 @@ public class LobbedAreaProjectile : Projectile
     // One frame of following the pulling point. Velocity-matching (critically damped),
     // so the ball settles to the point's velocity rather than to Vmax or zero — which
     // is what makes the detach speed the swipe speed (plan §4.1).
-    private void Track(float dt, HitboxWorld hitboxes, IEntitySpawner spawner)
+    // Returns whether the point is still in the player's hand (the held fuse).
+    private bool Track(float dt, IEntitySpawner spawner)
     {
         var cfg   = MovementConfig.Current;
         var point = spawner?.Resolve(_pointId) as PullPointEntity;
-        if (point == null || point.IsDead) { Detach(); return; }
+        if (point == null || point.IsDead) { Detach(); return false; }
 
         float smoothTime;
         if (point.Driven)
@@ -402,45 +418,23 @@ public class LobbedAreaProjectile : Projectile
             // Ceiling, not floor: keep the full count until the bleed has actually
             // consumed a block; reach zero exactly at GrabDissipateSeconds.
             _budget = frac <= 0f ? 0 : (int)MathF.Ceiling(_harvest * frac);
-            if (_budget <= 0) { Health = 0f; return; }
+            if (_budget <= 0) { Health = 0f; return true; }
 
             // Held fuse: terrain never sets a held clod off (it scrapes and slides —
             // the player is still aiming it), but swinging it into someone who can be
-            // hurt does, through exactly the thrown clod's burst: same Detonate, same
-            // hitboxes, same HitId, so CombatSystem's faction gate, co-op filter,
-            // hitstop and dedupe all apply unchanged. Detach first, as the chase path
-            // does, so the point and the action see the ball leave the hand this frame
-            // (the point dies, the action ends and hands off) — no action-side state.
-            if (TouchesBody(spawner?.Hurtboxes, coop: spawner?.Coop == true))
-            {
-                Detach();
-                Detonate(hitboxes, spawner, bodyHit: true);
-                return;
-            }
+            // hurt does, through exactly the thrown clod's burst (PublishSensor senses
+            // bodies only while held).
         }
         else
         {
+            // Already thrown, just not yet up to speed — both fuses are live here too:
+            // a clod thrown at a wall or a body within the chase window (a quarter
+            // second: point-blank range) must burst there, not phase through.
             smoothTime = cfg.GrabChaseSmoothTime;
             _chaseTime += dt;
-
-            // Already thrown, just not yet up to speed — so both fuses are live here
-            // too. Without this a clod thrown at a wall or a body within the chase
-            // window (a quarter second: point-blank range) neither bursts nor detaches
-            // — the tracker just presses it against the wall until the chase times
-            // out, and it drops to the floor. Checked BEFORE the tracker runs, so the
-            // velocity the core hit reads is the one the impact left, not the one the
-            // tracker is about to write back toward the point.
-            bool touched = TouchesBody(spawner?.Hurtboxes);
-            if (touched || TerrainStruck(settleCounts: false))
-            {
-                Detach();
-                Detonate(hitboxes, spawner, bodyHit: touched);
-                return;
-            }
         }
 
-        // Tracker on a copy; only the velocity goes back — physics moves the body (and
-        // resolves the tiles it slides along).
+        // Tracker on a copy; only the velocity goes back — physics moves the body.
         var pos = Body.Position;
         var vel = Body.Velocity;
         SmoothPen.CriticallyDampedStep(ref pos, ref vel, point.Body.Position, smoothTime, dt);
@@ -448,32 +442,15 @@ public class LobbedAreaProjectile : Projectile
         if (speed > cfg.GrabBallMaxSpeed) vel *= cfg.GrabBallMaxSpeed / speed;
         Body.Velocity = vel;
 
-        if (point.Driven) return;
+        if (point.Driven) return true;
 
         if ((vel - point.Body.Velocity).Length() < cfg.GrabCatchSpeed
             || _chaseTime >= cfg.GrabChaseMaxSeconds)
             Detach();
+        return false;
     }
 
-    // Terrain-transparent while the clod is in hand, and after release while its
-    // CENTER is inside a solid cell: a clod let go buried in the ground flies out of it
-    // instead of bursting (or wedging) in the cells it was carried through. A shallower
-    // overlap — the rim of a clod released against a wall — keeps tile contact, so the
-    // solver pushes it out and the strike fuse bursts it on the face (and a clod resting
-    // on a floor, whose center never enters solid, can't flicker through it).
-    private bool TerrainTransparent(IEntitySpawner spawner)
-    {
-        if (_tracking && spawner?.Resolve(_pointId) is PullPointEntity { IsDead: false, Driven: true })
-            return true;
-        var chunks = spawner?.Chunks;
-        if (chunks == null) return false;
-        var p = Body.Position;
-        return chunks.GetCellState((int)MathF.Floor(p.X / Chunk.TileSize),
-                                   (int)MathF.Floor(p.Y / Chunk.TileSize)) == TileState.Solid;
-    }
-
-    // Let go of the point: a free ballistic lob from here, arming clock restarted so a
-    // dropped clod isn't "landed" on its first free frame.
+    // Let go of the point: a free ballistic lob from here.
     private void Detach()
     {
         _tracking    = false;

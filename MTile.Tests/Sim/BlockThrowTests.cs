@@ -444,9 +444,9 @@ public class BlockThrowTests(ITestOutputHelper output)
 
 
     // A flat-out horizontal throw arcs into the floor with most of its speed intact.
-    // It should burst there — within a frame or two of the contact and within a tile
-    // of where it touched down — not skid along until friction has stopped it, which
-    // is what the old velocity-halt heuristic waited for.
+    // It should burst there — while still flying fast, with the orb resting on the floor
+    // face rather than sunk into it — not skid along until it has slowed down, which is
+    // what the old solver-contact fuse did on a glancing hit (2026-11-16).
     [Fact]
     public void ThrownClod_BurstsWhereItStrikesTheGround()
     {
@@ -462,35 +462,29 @@ public class BlockThrowTests(ITestOutputHelper output)
             }
             script.Forever(new PlayerInput { MouseWorldPosition = p });
 
-            int contactFrame = -1, goneFrame = -1;
-            float contactX = 0f, contactSpeed = 0f, lastX = 0f;
+            float burstSpeed = -1f, burstY = 0f, burstR = 0f, lastSpeed = 0f;
             SimRunner.RunMulti(Build(script, WideFloor(), 120),
                 onFrameEntities: (f, ps, es) =>
                 {
-                    LobbedAreaProjectile ball = null;
-                    foreach (var e in es) if (e is LobbedAreaProjectile b && !b.Tracking) ball = b;
-                    if (ball != null)
+                    foreach (var e in es)
                     {
-                        lastX = ball.Body.Position.X;
-                        // onFrameEntities runs after StepSwept, so this is the contact
-                        // impulse from the step that just ran.
-                        if (contactFrame < 0 && ball.Body.LastImpulseMagnitude > 0.01f)
-                        {
-                            contactFrame = f;
-                            contactX     = ball.Body.Position.X;
-                            contactSpeed = ball.Body.Velocity.Length();
-                        }
+                        if (e is not LobbedAreaProjectile b || b.Tracking) continue;
+                        // A bursting clod's velocity is zeroed after it aims the core
+                        // hit, so the speed it burst at is the previous frame's.
+                        if (!b.Detonated) { if (!b.ContactPending) lastSpeed = b.Body.Velocity.Length(); continue; }
+                        if (burstSpeed >= 0f) continue;
+                        burstY = b.Body.Position.Y;
+                        burstR = b.DrawRadius;
+                        burstSpeed = lastSpeed;
                     }
-                    else if (contactFrame >= 0 && goneFrame < 0) goneFrame = f;
                 });
 
-            output.WriteLine($"first ground contact f{contactFrame} at x={contactX:F0} (|v|={contactSpeed:F0}), " +
-                             $"gone f{goneFrame} at x={lastX:F0}");
-            Assert.True(contactFrame > 0, "the thrown clod should reach the floor");
-            Assert.True(goneFrame > 0 && goneFrame - contactFrame <= 3,
-                        $"the clod should burst on contact, not after settling (contact f{contactFrame}, gone f{goneFrame})");
-            Assert.True(MathF.Abs(lastX - contactX) < Chunk.TileSize,
-                        $"it should break where it struck: touched at x={contactX:F0}, gone at x={lastX:F0}");
+            float floorTop = 3f * Chunk.TileSize;   // WideFloor: first X row
+            output.WriteLine($"burst at y={burstY:F1} (orb bottom {burstY + burstR:F1}, floor top {floorTop:F1}), |v|={burstSpeed:F0}");
+            Assert.True(burstSpeed >= 0f, "the thrown clod should burst");
+            Assert.True(burstSpeed > 100f, $"it should burst while still flying, not after skidding to a stop (|v|={burstSpeed:F0})");
+            Assert.True(MathF.Abs(burstY + burstR - floorTop) < 4f,
+                        $"the drawn orb should meet the floor face, not sink into it (bottom {burstY + burstR:F1} vs top {floorTop:F1})");
         });
     }
 
@@ -534,7 +528,7 @@ public class BlockThrowTests(ITestOutputHelper output)
             script.Forever(new PlayerInput { MouseWorldPosition = p });
 
             int hitFrame = -1, goneFrame = -1;
-            bool hitWhileChasing = false;
+            bool hitWhileChasing = false, prevTracking = false;
             var hitAt = Vector2.Zero;
             var lastAt = Vector2.Zero;
             SimRunner.RunMulti(Build(script, terrain, 120),
@@ -545,12 +539,15 @@ public class BlockThrowTests(ITestOutputHelper output)
                     if (ball != null)
                     {
                         lastAt = ball.Body.Position;
-                        if (hitFrame < 0 && ball.Body.LastImpulseMagnitude > 45f)
+                        // A burst during the chase detaches first, so whether it was
+                        // still chasing is the previous frame's Tracking.
+                        if (hitFrame < 0 && ball.Detonated)
                         {
                             hitFrame = f;
                             hitAt    = ball.Body.Position;
-                            hitWhileChasing = ball.Tracking;
+                            hitWhileChasing = prevTracking;
                         }
+                        prevTracking = ball.Tracking;
                     }
                     else if (hitFrame >= 0 && goneFrame < 0) goneFrame = f;
                 });
