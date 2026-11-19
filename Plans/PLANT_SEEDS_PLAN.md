@@ -295,7 +295,7 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
 - [x] M5 Snapper (§4.2) @43c00e9 (not yet seen on screen; guard interaction asserted by damage tier only)
 - [x] M6 Block-eater + tile art (§4.5) @abd94f0, hooked to the seed bar (art not yet seen on screen)
 - [x] M7 Economy: seeds on the build meter (§6.1), done with M1. Avalanche retune (§6.2) is feel work — not done here
-- [~] M8 Bots: the three behaviours in §8b — plant-a-spitter and hit-a-plant in flight; siege-line dodge waits on M3
+- [~] M8 Bots: plant-a-spitter and hit-a-plant merged @914eea6 (all Bulldog-family bots); siege-line dodge in flight
 - [ ] M9 Full sweep, web build check, docs (overview + area maps)
 
 ## Campaign log
@@ -321,6 +321,12 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
   buried seedling or pod also takes ~10 s to die (was ~3.3 s). 146 plant / garden / snapshot tests
   green; both hosts built by the parcel.
 - All five plants are plantable. Outstanding: visual QA, red triage vs base, bots, docs.
+- M8 bots, behaviours 1 and 2, merged. A last-pass constraint forces every Bulldog-family bot back
+  to the block bar whenever the planter is not running. 125 plant + bot-plant tests green. The bot
+  group has 27 reds both before and after (same names) — pre-existing. Plant behaviours only ever
+  fire on dirt arenas such as `garden`; the league arenas are stone.
+- Scope trimmed at the user's request: the base-vs-branch red triage run was stopped, and the bot
+  evaluation harness was removed. Remaining reds are compared to BACKLOG §5 by name only.
 - Baseline reds: the combat+terrain+simcore groups show ~40 reds outside plant code, over a dozen
   of them not in BACKLOG §5's table. To be triaged at M9, not assumed pre-existing.
 
