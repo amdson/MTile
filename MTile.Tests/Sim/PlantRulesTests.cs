@@ -131,6 +131,28 @@ public class PlantRulesTests
     }
 
     [Fact]
+    public void BlockEater_PlantsOnAnEnemyOwnedBlock_NotOnOwnOrUnownedOnes()
+    {
+        var sim = Make();
+        Run(sim, 0.5f);
+        var p = sim.Player;
+        byte mine = BlockOwnership.OwnerFor(p.Faction);
+        byte theirs = mine == BlockOwnership.Player1 ? BlockOwnership.Player2 : BlockOwnership.Player1;
+        int now = sim.Chunks.TerrainFrame;
+        // Floor cells: 6 unowned, 7 owned by me, 8 owned by the other player.
+        sim.Chunks.Ownership.Stamp(7, FloorRow, mine, now);
+        sim.Chunks.Ownership.Stamp(8, FloorRow, theirs, now);
+
+        Assert.False(SeedPlanting.TryPlant(Request(p, 6, FloorRow, SeedKind.BlockEater), null, sim.Chunks, sim));
+        Assert.False(SeedPlanting.TryPlant(Request(p, 7, FloorRow, SeedKind.BlockEater), null, sim.Chunks, sim));
+        Assert.Equal(PlantVerdict.Ok,
+            PlantRules.Evaluate(Request(p, 8, FloorRow, SeedKind.BlockEater), sim.Chunks, sim.Entities, null, out _));
+        Assert.True(SeedPlanting.TryPlant(Request(p, 8, FloorRow, SeedKind.BlockEater), null, sim.Chunks, sim));
+        Assert.True(sim.Chunks.BlockEater.Has(8, FloorRow));
+        Assert.Empty(Plants(sim));
+    }
+
+    [Fact]
     public void Blocks_CanBePlacedOverAPlant()
     {
         var sim = Make();

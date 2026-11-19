@@ -20,7 +20,7 @@ public static class SeedPlanting
         SeedKind.Snapper    => true,
         SeedKind.Thorns     => true,
         SeedKind.SiegePod   => false,   // milestone M3
-        SeedKind.BlockEater => false,   // milestone M6
+        SeedKind.BlockEater => true,
         _                   => false,
     };
 
@@ -56,7 +56,10 @@ public static class SeedPlanting
             case SeedKind.SiegePod:
                 return false; // filled by milestone M3 (req.Aim is the drag vector)
             case SeedKind.BlockEater:
-                return false; // filled by milestone M6
+                // Not an entity either: an infection in World/BlockEaterInfection.cs, planted ON
+                // an enemy-owned block. Evaluate asked CanPlantBlockEater this frame.
+                if (meters != null && !meters.TrySpendUnits(PlantTuning.CostFor(req.Seed))) return false;
+                return chunks.TryPlantBlockEater(req.CellX, req.CellY, BlockOwnership.OwnerFor(req.Faction));
             default:
                 return false;
         }

@@ -101,8 +101,9 @@ public static class PlantRules
         switch (seed)
         {
             case SeedKind.BlockEater:
-                // filled by milestone M6 (enemy-owned block root); dirt rule until then
-                return TryDirtSite(chunks, cx, cy, out site);
+                // Handled in Evaluate (it needs the planter's faction); never a dirt site.
+                site = default;
+                return false;
             default:
                 return TryDirtSite(chunks, cx, cy, out site);
         }
@@ -172,6 +173,17 @@ public static class PlantRules
         site = default;
         if (!SeedPlanting.IsImplemented(req.Seed))            return PlantVerdict.NotImplemented;
         if (!InReach(req.OwnerPos, req.CellX, req.CellY))     return PlantVerdict.OutOfReach;
+        if (req.Seed == SeedKind.BlockEater)
+        {
+            // The one seed that roots ON a block: a solid cell owned by another player, any
+            // material (§4.5). Its own cap (one live patch per player) is inside CanPlant.
+            site = new PlantSite(req.CellX, req.CellY, PlantRoot.Below);
+            if (!chunks.CanPlantBlockEater(req.CellX, req.CellY, BlockOwnership.OwnerFor(req.Faction)))
+                return PlantVerdict.NoRoot;
+            if (meters != null && meters.BuildMove + meters.EruptMove < PlantTuning.CostFor(req.Seed))
+                return PlantVerdict.CantAfford;
+            return PlantVerdict.Ok;
+        }
         if (!TryFindSite(req.Seed, chunks, req.CellX, req.CellY, out site)) return PlantVerdict.NoRoot;
         if (Occupied(entities, req.CellX, req.CellY))         return PlantVerdict.Occupied;
         // Thorns are tile state, capped by ThornPatches (patches and cells per team, §4.3).

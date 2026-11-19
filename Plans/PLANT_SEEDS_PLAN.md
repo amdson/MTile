@@ -290,12 +290,12 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
 - [x] M0 Plumbing — bar swap (`F`), seed selection, cursor ghost, HUD @c96def0
 - [x] M1 Plant base (root, growth, team, burial, cap, cost) + Spitter + its figure @c96def0 (figure, ghost, HUD not yet seen on screen)
 - [x] M2 Duel stage `garden` — adventure terrain walled with `Hardened` (§8a) @fbcb20c (not yet run in game)
-- [~] M3 Siege pod (§4.4) — figure merged @fbcb20c; firing mechanics in flight; entity wrapper to do
+- [~] M3 Siege pod (§4.4) — figure @fbcb20c and firing mechanics (`Entities/Plants/SiegeBlast.cs`) @23a3058 merged; entity wrapper in flight
 - [x] M4 Thorns: spreading, caps, reinforcement + tile art (§4.3) @4e36f44, hooked to the seed bar (art not yet seen on screen)
 - [x] M5 Snapper (§4.2) @43c00e9 (not yet seen on screen; guard interaction asserted by damage tier only)
-- [~] M6 Block-eater + tile art (§4.5)
+- [x] M6 Block-eater + tile art (§4.5) @abd94f0, hooked to the seed bar (art not yet seen on screen)
 - [x] M7 Economy: seeds on the build meter (§6.1), done with M1. Avalanche retune (§6.2) is feel work — not done here
-- [ ] M8 Bots: the three behaviours in §8b
+- [~] M8 Bots: the three behaviours in §8b — plant-a-spitter and hit-a-plant in flight; siege-line dodge waits on M3
 - [ ] M9 Full sweep, web build check, docs (overview + area maps)
 
 ## Campaign log
@@ -312,6 +312,9 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
   thorn and its block, the block takes the reduced damage and the thorn comes off; later frames
   cut at full damage.
 - M5 snapper merged. 60 plant tests green.
+- Siege firing merged (23 tests; web project compiled by the parcel). The lance hits everyone via a
+  new `Faction.Hazard` no hurtbox carries. Block-eater merged and hooked into `SeedPlanting`
+  (tile state in `World/BlockEaterInfection.cs`, planted ON an enemy-owned block). 95 plant tests green.
 - Baseline reds: the combat+terrain+simcore groups show ~40 reds outside plant code, over a dozen
   of them not in BACKLOG §5's table. To be triaged at M9, not assumed pre-existing.
 
