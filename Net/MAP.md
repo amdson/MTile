@@ -1,6 +1,6 @@
 # Net map
-Verified against: 4e34142 (2026-11-14)
-Covers: Net/*.cs, Net/Bot/** (Control, Duelists, Maneuvers, Routing), MTile.Rtc/
+Verified against: e5b75c6 (2026-11-19)
+Covers: Net/*.cs, Net/Bot/** (Control, Duelists, Maneuvers, Routing, Net/Bot/Maneuvers/PlantManeuvers.cs, Net/Bot/Maneuvers/SiegeDodgeManeuver.cs), MTile.Rtc/
 
 ## What this area is
 Two unrelated halves that share a namespace and the `PlayerInput` record. (1) Rollback netcode: `RollbackSession`
@@ -47,6 +47,7 @@ Bot framework (`Net/Bot/`)
 Desktop transport (`MTile.Rtc/`, separate csproj, references Core, SIPSorcery 10.0.7)
 - `RtcConnection.cs` - one RTCPeerConnection + one unordered, `maxRetransmits = 0` DataChannel; non-trickle base64 SDP blobs; `OnBytes` raised off the game thread.
 - `RtcSessionLink.cs` - binds an `RtcConnection` to a `RollbackSession`. Not referenced anywhere outside its own file (Desktop goes through `NetSetup`).
+- Plant bots (Bulldog family, `BulldogBot.cs:84,130-135,170`; `Plans/PLANT_SEEDS_PLAN.md` §8b): `Maneuvers/PlantManeuvers.cs` `PlantSpitterManeuver` (scripted F, Num1, RMB press, release, F through `PlayerInput`), `PlantStrikeManeuver` (a few swings at `BotView.OpposingPlants`), `SeedBarReturnConstraint`; `Maneuvers/SiegeDodgeManeuver.cs` (Reflex: leaves a telegraphed pod's lane/blast disc within 2 s of firing, via `BotView.SiegePods` + `SiegeBlast.Preview`).
 
 ## Flow
 (a) Rollback loop (online only; `Game1` creates it when constructed with a `NetSetup`)
@@ -112,6 +113,8 @@ Desktop transport (`MTile.Rtc/`, separate csproj, references Core, SIPSorcery 10
 - `BetLedger.Tick` treats an HP rise (respawn) as 0 (`BetLedger.cs:143-144`); records closed before `MinRecordFrames` (8) are dropped unscored (`:129`).
 - The only mutable static in the area is `JumpTable._byOffset`, a lazy cache of constant data (`JumpTable.cs:62-75`). `JumpTable.g.cs` is generated; regenerate it, do not hand-edit.
 - `BotClickRetap` is a mutable struct held in a non-readonly field (`BrawlerBotInputSource.cs:107`, `BulldogBot.cs:164`); making that field `readonly` silently breaks it.
+- Plant bots must end on the block bar: `SeedBarReturnConstraint` masks RMB and the number row and taps F until `Self.SeedBarActive` is false whenever the planter did not step this frame, however the script ended (abort, preempt, timeout).
+- Plant behaviours only fire where `PlantRules.Evaluate` says Ok, i.e. on DIRT arenas such as `garden`; the league arenas are stone, so the bot group is unaffected there.
 
 ## Where to change X
 - Input delay / ring size / redundancy / stall timeout: constants at `RollbackSession.cs:29-39` (both peers must match).
@@ -132,3 +135,4 @@ Desktop transport (`MTile.Rtc/`, separate csproj, references Core, SIPSorcery 10
   Route, RouteJumpTable, SpikeGuard, Movement, BuildClimb, CrystalWave, RangerCrystalWave, Avalanche{Charge,Crush,Ride}) plus `TwoPlayerStepTests`. Harness: `BotArena.cs`, `BotTraceReport.cs`.
 - Slow-only (`full --slow`, prefix `Zzz`): `ZzzDuelistLeague`, `ZzzLearningEffect` (regenerates `BetCalibration`), `ZzzBotControllerParity`, `ZzzRangerEval`,
   `ZzzHarrierEval`, `ZzzCamperEval`, `ZzzSpikeGuardEval`, `ZzzHitAndRunProbe`, `ZzzRouteCalibration` (generates `JumpTable.g.cs`), `ZzzRouteWallClimbCalibration` (NavGrid climb costs).
+Plant bots: `BotManeuverPlantTests` (bot group via "BotManeuver"; also `Sim.Plant`).

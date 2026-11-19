@@ -25,6 +25,10 @@ Boots the game, waits 20 frames for the world to settle, saves the frame, exits.
 Desktop only (no-op in the browser build). F12 in a live session is the manual
 equivalent (timestamped PNG next to the binary).
 
+`MTILE_SCREENSHOT_FRAME=N` moves the capture frame (default 20). `MTILE_SCREENSHOT_MOUSE="fx,fy"` pins the
+cursor at that fraction of the viewport (`0.5,0.5` = centre) so the camera's cursor lead and the
+seed-bar ghost are reproducible; desktop only.
+
 The default boot is the normal stage + idle player. To capture a *situation*,
 pass a scenario config as the CLI arg:
 

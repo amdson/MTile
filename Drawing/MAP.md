@@ -1,5 +1,5 @@
 # Drawing / Presentation / Game1 render path map
-Verified against: 069e3a3 (2026-11-14)
+Verified against: e5b75c6 (2026-11-19)
 Covers: Drawing/*.cs, Presentation/*.cs, Game1.cs (render path: LoadContent, PresentThisFrame, Draw), Camera.cs (draw transform only)
 
 ## What this area is
@@ -10,7 +10,7 @@ Boundary: rig solving, clips and `CharacterAnimator` are `Animation/` (Drawing o
 ## Files
 - `DrawContext.cs` (102): the immediate primitive API over `SpriteBatch` + 1x1 pixel: `Line/Dashed/Box/Rect/RotatedRect/Ring/Stamp/Disc`. Stateless; Begin/End is Game1's. It is the only primitive helper, but not the only pixel drawer: ChunkRenderer, BackWallRenderer, GrassField, DebugOverlayRenderer and the HUDs call `SpriteBatch.Draw(pixel, Rectangle)` directly.
 - `Shape.cs`, `Sprite.cs`, `Sprites.cs`, `PrismFigure.cs`, `QuillbackFigure.cs`: vector sprites.
-  `Plants/SiegePodFigure.cs`: the siege pod plant (parametric: pose, growth, aim, root face, team colour; cached `Get`, uncached `Build`).
+  `Plants/` (plant art, code-built, no sheets): `PlantFigureKit.cs` (`PlantPalette` colours incl. `Team`/`Legal`/`Illegal`/`SeedSwatch`, `PlantFigureKit` upright-figure helpers with `RootY`, `PoseTelegraph` pose-to-`TelegraphList` for the ghost), `SpitterFigure.cs`, `SnapperFigure.cs`, `SiegePodFigure.cs` (parametric: pose, growth, aim, root face, team colour; cached `Get`, uncached `Build`), `PlantGhost.cs` (seed-bar cursor ghost + siege aim line; `Game1.cs:1483`).
   `Pose` = list of `Shape`s in local space; `Sprite.Draw(DrawContext)`; `AnimatedSprite` swaps poses; `Sprites.*` are vector-sprite factories (Sprites.cs 479 lines: Player, Ball, Balloon, Bullet, and one per enemy kind), called from entity ctors.
 - `PrimitiveBatch.cs`: vertex-colored triangles via `DrawUserPrimitives` + `BasicEffect`; must run OUTSIDE a SpriteBatch Begin/End. `Primitives.cs`: CPU tessellation (curve ribbons, surface grids) that emits into a begun PrimitiveBatch.
 - `ChunkRenderer.cs` (643): world geometry pass (see index). `TilePalette`, `TileVariation`, `TileTextureAtlas`, `MassOrbTextures`: tile colors, per-cell brightness noise, grain atlas (96px patches), clod-disc textures cut from the atlas.
@@ -31,6 +31,7 @@ Boundary: rig solving, clips and `CharacterAnimator` are `Animation/` (Drawing o
   - `LoadStage` 509; `PresentThisFrame` 580 (event switch 587); `ApplyFreezeFrame` 657; `LoadContent` 700 (constructs every renderer; atlas 734-747; backdrop 795-829); `OpenAsset` 872.
   - `Update` 912: net path 1050-1104, creative 1105-1111, offline 1112-1190, `PresentThisFrame` 1195. `SkinForPlayer/SkinByName` 1207-1230.
   - `Draw` 1232-1645 (order under Flow); `UnloadContent` 1647.
+- Plant tile art: `ThornRenderer.cs` (thorn-patch spikes as brambles; seed cell bigger with a bud; withered when its seed is gone; called by `ChunkRenderer.DrawThorns`, ChunkRenderer.cs:68,348) and `BlockEaterRenderer.cs` (vines over infected cells in the EATER's colour, growing with cell damage from the `From` edge, pulsing heart; ChunkRenderer.cs:65). `HudRenderer.DrawSeedPickerHud` (:144, chosen at :109 when `SeedBarActive`). `ScreenshotSystem.cs:20,39` `MTILE_SCREENSHOT_MOUSE="fx,fy"` pins the cursor (desktop only) so the ghost/camera lead are reproducible.
 
 ## Flow
 Update half (not drawing, but it feeds Draw):
@@ -94,6 +95,9 @@ Telegraph handoff: sim code appends to `TelegraphList` (ActionState.Telegraph, E
 - A new sim->render event: add a `PresentationKind` (PresentationEvents.cs:24), emit with a state-derived id, handle in `PresentThisFrame` switch (Game1.cs:587).
 - HUD readouts: `HudRenderer.Draw` (:35); boss bars `BossBarHud`; add a profiler slot in `Initialize` (Game1.cs:281) for a new pass.
 - Backdrop: `IBackdrop` implementations; selection in `LoadContent` (Game1.cs:795).
+- Plant figures are drawn UPRIGHT in the cell frame (origin cell centre, root at +`PlantFigureKit.RootY`, growing toward -y); `PlantEntity.SyncSprite` rotates the whole sprite onto the real root face. Do not special-case walls/ceilings in a figure.
+- The plant overlay (growth arc, buried outline + health tick, kind tells, ghost) is `Telegraph` output, not Sprite: it is world-space and unrotated.
+- The ghost reads the sim's own `PlantRules.Evaluate`; never duplicate legality in Drawing. Plant HUD/ghost are seen in the real renderer for all kinds except the siege pod figure (BACKLOG plants entry).
 
 ## Tests
 - `MTile.Tests/Presentation/TelegraphListTests` (group `combat`, term "TelegraphList").

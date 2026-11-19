@@ -1,5 +1,5 @@
 # World map
-Verified against: 4e34142 (2026-11-14)
+Verified against: e5b75c6 (2026-11-19)
 Covers: World/*.cs, Levels/ (format summary), Stages/*.cs
 
 ## What this area is
@@ -18,10 +18,11 @@ The sim-side tile world and the hit/hurt registries. `ChunkMap` owns the dense t
 - `TerrainJournal.cs`: inverse-delta log (TileWrite, ChunkCreated). `TerrainSnapshot.cs`: `TerrainSnapshot`, `SproutGraphData`, `SproutNodeData`. `DenseTerrainCapture.cs`: full-grid copy for the recorder.
 - Sparse tables (each has Capture/Restore): `TileDamage.cs` (HP), `TileCharge.cs`, `FoamDecay.cs`, `TileSpikeSeeds.cs`, `TileImpactAccumulator.cs`, `TileMassField.cs`, `AvalancheWaves.cs`, `BlockOwnership.cs`, `BlockEaterInfection.cs` (block-eater plant: infection table, ticked in `TickSprouts`, chews via `DamageCell`; art in `Drawing/BlockEaterRenderer.cs`), `CrystalWaveField.cs` (+ `CrystalWave.cs` dials, `CrystalLifecycle.cs` phase math).
 - Sprouts: `TileSproutGraph.cs` (Pending/Growing lists, dedupe by cell), `TileSproutNode.cs` (faces, volume geometry, `FaceOrder`).
+- Plants as tile state (`Plans/PLANT_SEEDS_PLAN.md`): `ThornPatches.cs` (`ChunkMap.Thorns`: patch records + cell membership, `TryPlant`/`CanPlant`, `Tick` spreads one spike per patch every 90 frames under caps 10 cells/patch, radius 4, 24 cells + 2 patches/team; `Reinforces`, `OnSpikeCleared`) and `BlockEaterInfection.cs` (`ChunkMap.BlockEater`: per-cell infection with `Cell{Team, InfectedFrame, Heart, From}`, `Tick` chews through `DamageCell` and spreads over enemy-owned Solid cells, 1 live patch/team). Hook points in `ChunkMap.cs`: fields/API 66-92, `WriteTile` clears thorns 151, `TickSprouts` tail ticks both 667-675, `DamageCell` applies the ×0.5 reinforcement 874-877, `BreakCell`/`EditorSetCell` clear the eater 923/962, capture/restore 1007-1031. `CombatSystem.cs:243-250,324` `KnockOffThorns` (thorn-grown spikes only). `Simulation.Checksum` folds both (Simulation.cs:777-791). `Hitbox.cs`: `Faction.Hazard` (last enum value; hitbox-only, hits everyone).
 - `MaterialStrengths.cs`: per-type MaxHP, Restitution, BuildCost, loaded from `configs/material_strengths.json`.
 - Queries: `TileQuery.cs`, `TileQueryChain.cs`, `TileFilters.cs` (solid-only fluent queries for probes), `WorldQuery.cs` (tiles + providers), `SolidShapeProvider.cs` (`SolidShapeRef`, `ISolidShapeProvider`), `MovingRectangle.cs` (platform provider), `TileReach.cs` (terrain line-of-sight and area damage).
 - Combat: `Hitbox.cs` (struct, `Faction`, `HitTargets`, `ClankKind`), `Hurtbox.cs`, `HitboxWorld.cs`, `HurtboxWorld.cs`, `CombatSystem.cs` (708; `Sense` = sensor hitboxes), `SensorContact.cs` (`SensorContact`, `IContactSensor` — swept first-contact reports for `Hitbox.Sensor`), `HitIdAllocator.cs`, `ForceField.cs` (`ForceField`, `ForceFieldWorld`, `ForceFieldSystem`), `SpikeContactSystem.cs`, `CrystalContactSystem.cs` (post-sweep contact damage).
-- Loading and generation: `TerrainLoader.cs` (level json + ascii), `AsciiTerrain.cs` (test/tool builder), `WorldGenerator.cs` (`IChunkGenerator`, endless terrain), `PerlinNoise1D.cs`, `ValueNoise2D.cs`.
+- Loading and generation: `TerrainLoader.cs` (level json + ascii), `AsciiTerrain.cs` (test/tool builder), `WorldGenerator.cs` (`IChunkGenerator`, endless terrain) (optional `BoundaryHalfWidth`/`BoundaryHeadroom`: `Hardened` walls beyond ±N tiles, from `WorldGenerator.cs:86-93,154-181`), `PerlinNoise1D.cs`, `ValueNoise2D.cs`.
 - `Levels/`: `*.json` = `TerrainConfig` (`Extents`, `ChunkFiles` "cx,cy" to txt, `Rules` like `"y >= 6"`, optional `Perlin`, optional `WorldGen`, `PlayerSpawn`); `*.txt` = 16 rows x 16 chars per chunk (X/x Stone, D Dirt, S Sand, F Foam, H Hardened, else empty); `Levels/saved/` = StageSaver output.
 - `Stages/`: `DuelStages.cs` (duel_hall, duel_plain, `DuelChunks`), `WallDummyStage.cs`, `DepthsStage.cs` (381, `DepthsPlan` table, ticker-driven room/wave script, state in `g.StageVars`), `DepthsLayout.cs` (900), index:
   - 20-92 `DepthsShape`, `DepthsRoom`, `DepthsMap` (tile-unit rectangles, world-px Vector2s)
@@ -30,6 +31,7 @@ The sim-side tile world and the hit/hurt registries. `ChunkMap` owns the dense t
   - 456-531 decoration (`Spike`, `Decorate`, `Zigzag`)
   - 534-820 shapes: `Hall` 534, `Shaft` 612, `Gallery` 642, `Terraces` 665, `Chasm` 697, `Dome` 728, `Massive` 764
   - 823-900 spawn/anchor spot computation (`ClearBox`, `Spots`)
+- `Stages/PlantShowStage.cs` (214): debug `plant_show*` stages (eight dirt rooms; plants spawned directly and pre-grown by stepping their own `Update`, thorn patches pre-spread by ticking; not in `LobbyStages`). The playable plant stage `garden` is in `Stage.cs:410` over `Levels/garden.json` (the `adventure` WorldGen block + `BoundaryHalfWidth` 90).
 
 ## Flow
 (a) Tile edit, request to committed:
@@ -91,6 +93,10 @@ The sim-side tile world and the hit/hurt registries. `ChunkMap` owns the dense t
 - New level: add `Levels/<name>.json` (+ chunk txt) and register in `Stage.cs`; procedural/endless: `WorldGenConfig` in `WorldGenerator.cs`; code-built stage: `Stages/DuelStages.cs` pattern (`DuelChunks`).
 - Contact-damage hazards (spikes, crystals): `SpikeContactSystem.cs`, `CrystalContactSystem.cs`, tuning in `CrystalWave.cs`.
 - Pull/hold effects on bodies: `ForceFieldSystem.Apply` (ForceField.cs:101).
+- Thorns and the block-eater are tile state, not entities: no hurtbox, no `EntityKind` in use. Anything that must survive rollback is in the `Capture`/`Restore` pair AND the `Simulation.Checksum` fold; iteration with effects runs over sorted keys (dictionary order must not leak). A new tile-state table follows the same list (CaptureTerrain, RestoreTerrain, WriteTile/BreakCell cleanup, Checksum).
+- A thorn's reinforcement lives in `DamageCell` (everything that damages a block sees it, the siege lance included, which pays the scaled price); the eater also damages through `DamageCell`, so a thorned block resists it. Same-swing rule: the first frame a swing covers a thorn and its block, the block takes the reduced hit and the thorn comes off; later frames hit at full damage.
+- Hand-placed spikes (`TryRequestSpike`) are NOT in the thorn table: they neither spread nor reinforce, and no hit knocks them off (CombatSystem's tile pass collects Solid cells only; BACKLOG plants entry).
+- `Faction.Hazard`: no body carries it, so `CombatSystem`'s same-faction skip never fires. Only `SiegeBlast` publishes it. Add a Hazard source only if it is meant to hit its own planter.
 
 ## Tests
 Under `MTile.Tests/` (`scripts/test-group.py` filters `FullyQualifiedName~term`, so a term matches anywhere in namespace.class.method; in practice class names):
@@ -99,3 +105,4 @@ Under `MTile.Tests/` (`scripts/test-group.py` filters `FullyQualifiedName~term`,
 - `simcore`: `SnapshotRoundTripTests`, `DepthsStageTests`, `DepthsDeterminismTests`, `DepthsLayoutTests`, `DuelStageTests`, `WallDummyStageTests`, `StageSaverTests`.
 - `bot`: `BotManeuver*CrystalWave*Tests`, `BotManeuverSpikeGuardTests`. No test class is named for `TerrainJournal`, `MaterialStrengths` or `ForceFieldSystem`. The journal is exercised only indirectly through `CaptureTerrain`/`RestoreTerrain` and sim snapshots (`TerrainRollbackTests`, `InfiniteTerrainTests`, `BlockChargeTests`, `SnapshotRoundTripTests`); `MaterialStrengths` is referenced by `ConfigLayoutTests`, `FighterBlockActionTests`, `SpikeOverlayTests`; `ForceFieldSystem` runs in `SimRunner` (so every Sim scenario), and `GrabTests`/`CombatFeelTests` mention force fields. `TileImpactAccumulator` has no test reference.
 Headless scenario harness: `MTile.Tests/Sim/SimTerrain.cs`, `SpikeTiles.cs`.
+Plants: `PlantThornTests` (reinforcement, caps, spread), `PlantBlockEaterTests`, `GardenStageWorldTests` (boundary + garden stage); group terms `Sim.Plant` / `Tests.Plant`.
