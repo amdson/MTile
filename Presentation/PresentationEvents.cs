@@ -29,6 +29,7 @@ public enum PresentationKind : byte
     MassLand,      // a thrown/lobbed mass ball landed and erupted (A/B = entity id index/generation; payload = TileType | blocks << 8 | PresentationEvent.MassLandBodyHitBit when it burst on a body)
     ChargedBlast,  // a destroyed charged block detonated (A/B = entity id index/generation; payload = blast radius in px)
     TerrainStrike, // a player's attack struck terrain (A = HitId; payload = into-surface angle in milliradians)
+    ShotBurst,     // a spitter's shot burst on a body or terrain (A/B = entity id index/generation; payload = owner's team index)
     Clank,         // two attacks clanked (A/B = the HitIds, lower first; payload = 1 metallic, 0 explosive)
 }
 

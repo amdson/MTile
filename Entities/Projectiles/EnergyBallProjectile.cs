@@ -23,18 +23,20 @@ public class EnergyBallProjectile : Projectile
     public  const float DefaultSpeed       = 500f;
     public  const float DefaultDamage      = 1.0f;
     private const float LifeSeconds        = 1.2f;
-    private const float HitboxHalfSize     = 5f;
-    private const float CollisionStopSpeed = 30f;
-    private const float ArmDelay           = 0.03f;
+    protected const float HitboxHalfSize   = 5f;
+    protected const float CollisionStopSpeed = 30f;
+    protected const float ArmDelay         = 0.03f;
     // Sits in line with the creature melee/lunge knockback (250/300) so a ranged
     // punish reads like the same family of hit. vs player Mass 2.5 → 132 px/s;
     // vs Brute Mass 1.2 → 275 px/s; vs Stalker Mass 1.0 → 330 px/s.
     private const float KnockbackImpulse   = 330f;
 
-    private readonly int   _hitId;
-    private readonly float _damage;
+    protected readonly int   _hitId;
+    protected readonly float _damage;
 
     public override EntityKind Kind => EntityKind.EnergyBall;
+
+    // Spawns nothing extra; exists so SpitProjectile can share the ctor.
 
     // _hitId and _damage are immutable (set once at construction); WriteState
     // records them so Rehydrate can pass them back through the ctor. Speed needs

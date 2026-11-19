@@ -76,11 +76,10 @@ public sealed class SpitterPlant : PlantEntity
         if (spawner?.HitIds == null) return;
         var from = Mouth;
         var dir  = _aim - from;
-        spawner.SpawnEntity(new EnergyBallProjectile(from, dir, spawner.HitIds.Next(), Faction,
+        spawner.SpawnEntity(new SpitProjectile(from, dir, spawner.HitIds.Next(), Faction,
                                                      speed: PlantTuning.SpitterShotSpeed,
                                                      damage: PlantTuning.SpitterShotDamage,
-                                                     lifetime: PlantTuning.SpitterShotLifetime,
-                                                     pierce: false)
+                                                     lifetime: PlantTuning.SpitterShotLifetime)
         {
             Team  = Team,
             Color = PlantPalette.Spit,

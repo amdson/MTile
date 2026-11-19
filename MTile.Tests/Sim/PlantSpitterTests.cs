@@ -103,4 +103,95 @@ public class PlantSpitterTests
         Assert.False(plant.IsMature);   // growth froze under the block
         Assert.Equal(0, Spits(sim));
     }
+
+    // ── The shot hits like S1 and ends on impact ───────────────────────────────
+    private static (Simulation sim, PlayerCharacter p2) ShotArena(int shooterCol, int p2Col, out SpitProjectile shot,
+                                                                  float dirX = 1f)
+    {
+        SpitProjectile made = null;
+        var sim = Make(g =>
+        {
+            g.AddSecondaryPlayer(Spawn(p2Col));
+            made = new SpitProjectile(Spawn(shooterCol), new Microsoft.Xna.Framework.Vector2(dirX, 0f),
+                                      g.HitIds.Next(), g.Player.Faction,
+                                      PlantTuning.SpitterShotSpeed, PlantTuning.SpitterShotDamage,
+                                      PlantTuning.SpitterShotLifetime) { Team = g.Player.Team };
+            g.SpawnEntity(made);
+        });
+        shot = made;
+        return (sim, sim.SecondaryPlayers[0].Player);
+    }
+
+    [Fact]
+    public void Shot_EndsTheFrameItHitsTheOpponent_WithS1Knockback_Hitstun_AndPokeDamage()
+    {
+        var (sim, p2) = ShotArena(12, 16, out var shot);
+        float vx0 = p2.Body.Velocity.X;
+        int hitFrame = -1;
+        for (int i = 0; i < 120 && hitFrame < 0; i++)
+        {
+            sim.Step(default, default);
+            if (p2.Health < p2.MaxHealth) hitFrame = i;
+        }
+        Assert.True(hitFrame >= 0, "the shot should land");
+        Assert.True(shot.IsDead || !sim.Entities.Contains(shot), "the shot is removed on the frame it hits");
+        Assert.Equal(PlantTuning.SpitterShotDamage, p2.MaxHealth - p2.Health, 3);
+        Assert.True(p2.Combat.HitstunActive);
+        float x0 = p2.Body.Position.X, dvx = p2.Body.Velocity.X - vx0;
+        for (int i = 0; i < 12; i++) { sim.Step(default, default); dvx = System.Math.Max(dvx, p2.Body.Velocity.X - vx0); }
+        Assert.InRange(dvx, 60f, 400f);                                   // pushed away from the spitter, S1-sized
+        for (int i = 0; i < 90; i++) sim.Step(default, default);
+        Assert.DoesNotContain(sim.Entities, e => e is SpitProjectile && !e.IsDead);   // did not fly on through
+        Assert.Equal(sim.Player.MaxHealth, sim.Player.Health);
+    }
+
+    [Fact]
+    public void Shot_StoppedByTerrain_IsRemoved()
+    {
+        var (sim, p2) = ShotArena(12, 30, out var shot);
+        for (int y = Row - 6; y <= Row; y++) sim.Chunks.EditorSetCell(15, y, TileState.Solid, TileType.Stone);
+        for (int i = 0; i < 120; i++) sim.Step(default, default);
+        Assert.True(shot.IsDead || !sim.Entities.Contains(shot));
+        Assert.Equal(p2.MaxHealth, p2.Health);
+    }
+
+    [Fact]
+    public void Shot_NeverHitsOrBurstsOnItsOwner()
+    {
+        var (sim, p2) = ShotArena(12, 40, out var shot, dirX: 1f);
+        sim.Player.Body.Position = Spawn(12);   // standing in the shot's mouth
+        int bursts = 0;
+        sim.OnShotBurst += (id, pos, team) => bursts++;
+        for (int i = 0; i < 20; i++) sim.Step(default, default);
+        Assert.False(shot.IsDead);
+        Assert.Equal(0, bursts);
+        Assert.Equal(sim.Player.MaxHealth, sim.Player.Health);
+    }
+
+    [Fact]
+    public void Shot_RaisesOneBurstOnImpact()
+    {
+        var (sim, p2) = ShotArena(12, 16, out var shot);
+        int bursts = 0;
+        sim.OnShotBurst += (id, pos, team) => bursts++;
+        for (int i = 0; i < 120; i++) sim.Step(default, default);
+        Assert.Equal(1, bursts);
+    }
+
+    [Fact]
+    public void Shot_SnapshotRestoreInFlight_ReplaysIdentically()
+    {
+        var (sim, p2) = ShotArena(12, 20, out var shot);
+        for (int i = 0; i < 10; i++) sim.Step(default, default);
+        var snap = sim.Snapshot();
+        var a = new System.Collections.Generic.List<(ulong, float)>();
+        for (int i = 0; i < 90; i++) { sim.Step(default, default); a.Add((sim.Checksum(), p2.Health)); }
+        sim.Restore(snap);
+        for (int i = 0; i < 90; i++)
+        {
+            sim.Step(default, default);
+            Assert.Equal(a[i], (sim.Checksum(), p2.Health));
+        }
+        Assert.True(p2.Health < p2.MaxHealth);
+    }
 }

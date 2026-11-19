@@ -111,6 +111,7 @@ public sealed class BlobShadowRenderer
         {
             case EntityKind.Bullet:
             case EntityKind.EnergyBall:
+            case EntityKind.SpitShot:
             case EntityKind.RailBolt:
             case EntityKind.AspidFireball:
             case EntityKind.WizardOrb:

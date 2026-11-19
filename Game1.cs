@@ -621,6 +621,10 @@ public class Game1 : Game
             _events.Emit(_sim.Frame,
                          new PresentationId(PresentationKind.Clank, Math.Min(a, b), Math.Max(a, b)),
                          pos, metallic ? 1 : 0);
+        _sim.OnShotBurst += (id, pos, team) =>
+            _events.Emit(_sim.Frame,
+                         new PresentationId(PresentationKind.ShotBurst, id.Index, id.Generation),
+                         pos, team);
         _sim.OnChargedBlast += (id, pos, radius) =>
             _events.Emit(_sim.Frame,
                          new PresentationId(PresentationKind.ChargedBlast, id.Index, id.Generation),
@@ -668,6 +672,9 @@ public class Game1 : Game
                             Effects.Flash(_particles, e.Position, 14f, new Color(255, 220, 160), 0.06f);
                         }
                     }
+                    break;
+                case PresentationKind.ShotBurst:
+                    Effects.ShotBurst(_particles, e.Position, PlantPalette.Spit, PlantPalette.Team(e.Payload));
                     break;
                 case PresentationKind.ChargedBlast:
                     Effects.Blast(_particles, e.Position, e.Payload);

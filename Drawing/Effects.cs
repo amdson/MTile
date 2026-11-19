@@ -140,6 +140,28 @@ public static class Effects
     }
 
     // Soft puff that grows + fades. Use for landings, jump-dust, sprout puffs.
+    // A spitter's shot bursting: a lime flash, a fan of lime/team droplets.
+    public static void ShotBurst(ParticleSystem ps, Vector2 pos, Color lime, Color team)
+    {
+        Flash(ps, pos, 16f, lime, 0.08f);
+        for (int i = 0; i < 8; i++)
+        {
+            ref var p = ref ps.Spawn();
+            float ang = (float)(_rng.NextDouble() * MathHelper.TwoPi);
+            var v = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * (50f + (float)_rng.NextDouble() * 70f);
+            p.Position     = pos;
+            p.Velocity     = v;
+            p.Acceleration = -v * 3f;
+            p.MaxLife      = 0.18f + (float)_rng.NextDouble() * 0.12f;
+            p.Life         = p.MaxLife;
+            p.StartColor   = (i & 1) == 0 ? lime : team;
+            p.EndColor     = Color.Transparent;
+            p.StartSize    = 3f;
+            p.EndSize      = 1f;
+            p.Kind         = ParticleKind.Disc;
+        }
+    }
+
     public static void Puff(ParticleSystem ps, Vector2 pos, Color color, int count = 5)
     {
         for (int i = 0; i < count; i++)

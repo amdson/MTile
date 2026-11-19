@@ -305,6 +305,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         => OnMassLanded?.Invoke(id, pos, type, blocks, bodyHit);
     // IEntitySpawner — cosmetic: a destroyed charged block went off. Same (Frame, id)
     // keying contract as OnMassLanded.
+    public event Action<EntityId, Vector2, int> OnShotBurst;
+    public void NotifyShotBurst(EntityId id, Vector2 pos, int team) => OnShotBurst?.Invoke(id, pos, team);
     public event Action<EntityId, Vector2, float> OnChargedBlast;
     public void NotifyChargedBlast(EntityId id, Vector2 pos, float radius)
         => OnChargedBlast?.Invoke(id, pos, radius);

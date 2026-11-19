@@ -112,6 +112,7 @@ public static class EntityFactory
             // Speed rides in body.Velocity; damage comes back through ProjDamage.
             EntityKind.EnergyBall    => new EnergyBallProjectile(body.Position, body.Velocity, d.HitId, d.Faction, damage: d.ProjDamage,
                                                                  pierce: d.Impact != null),
+            EntityKind.SpitShot      => new SpitProjectile(body.Position, body.Velocity, d.HitId, d.Faction, damage: d.ProjDamage),
             EntityKind.FighterMine   => FighterMine.FromState(in d, body.Position),
             EntityKind.StickyGrenade => new StickyGrenadeProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.LobbedArea    => new LobbedAreaProjectile(body.Position, body.Velocity, d.Budget, d.TileType, d.HitId, d.Faction),

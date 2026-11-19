@@ -663,14 +663,14 @@ public abstract class SlashLikeAction : ActionState
     // more and light targets still ping. MinLaunch keeps repeat juggle hits
     // alive: a ball already flying away faster than the swing (u ≤ 0) still
     // visibly pops instead of a dead connect.
-    private   const   float    SlashStrikeMass     = 2.5f;
-    private   const   float    SlashRestitution    = 0.5f;
+    internal  const   float    SlashStrikeMass     = 2.5f;   // internal: the spitter's shot hits like S1 (PlantTuning)
+    internal  const   float    SlashRestitution    = 0.5f;
     // Was 180 — half the player's run speed handed out for merely connecting, which
     // is a good part of why the light slashes read as hitting a beach ball. The floor
     // is here so a connect is never a dead touch, not so a poke is a launch.
-    private   const   float    SlashMinLaunch      = 100f;   // default for MinLaunch below
+    internal  const   float    SlashMinLaunch      = 100f;   // default for MinLaunch below
     // Swing speed of the ground pokes (S1/S2), px/s - see GroundSlash1.StrikeSpeed.
-    protected const   float    PokeStrikeSpeed     = 310f;
+    internal  const   float    PokeStrikeSpeed     = 310f;
 
     // ----- per-variant knobs ------------------------------------------------
     protected abstract float   Duration            { get; }   // seconds
@@ -1011,6 +1011,9 @@ public abstract class SlashLikeAction : ActionState
 // explicit override, not the (now tiny) impulse.
 public class GroundSlash1 : SlashLikeAction
 {
+    // S1's authored knockback (the direction-carrying impulse) and hitstun, shared with the spitter's shot.
+    internal const float KnockbackPx      = 60f;
+    internal const float HitstunSeconds   = 22f / 60f;
     // Lucina-anchored retime (2026-09-01): jab-shaped — 5f startup / 3f active /
     // 12f swing + 10f recovery ≈ her Jab 1's 5/2/25. The old 2f startup was below
     // the perceptual floor; a slash needs to READ as swing–hit–follow-through.
@@ -1020,7 +1023,7 @@ public class GroundSlash1 : SlashLikeAction
     protected override float ArcRadiusScale      => 1.0f;
     protected override float SweepAngleDeg       => 100f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 60f; 
+    protected override float KnockbackMagnitude  => KnockbackPx;
     // A real swing (2026-11-18; was the default 1, a leftover from the hold-slash days, so
     // the 100 launch floor was the whole knockback and a victim walking in absorbed it).
     // 310 leaves a walker (-60) at about +150 after KnockbackSpeedScale: above walk speed,
@@ -1029,7 +1032,7 @@ public class GroundSlash1 : SlashLikeAction
     protected override Color SlashColor          => Color.Red;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
-    protected override float HitstunSecondsOverride => 22f / 60f;   // 22f (was 18f = 0.30 s; +4f 2026-11-06 pacing pass - S2 lands with 7f to spare, S1-and-stop is -3)
+    protected override float HitstunSecondsOverride => HitstunSeconds;   // 22f (was 18f = 0.30 s; +4f 2026-11-06 pacing pass - S2 lands with 7f to spare, S1-and-stop is -3)
     protected override bool  HoldVictims         => false;
     protected override float BodyDamageScale     => 0.5f;    // poke: 0.25 HP
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)

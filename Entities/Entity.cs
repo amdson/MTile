@@ -300,6 +300,8 @@ public interface IEntitySpawner
     // A mass ball landed and erupted: a cosmetic event for the render shell (particle
     // splash, audio). Default no-op — only Simulation forwards it, as OnMassLanded.
     void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks, bool bodyHit = false) { }
+    // A spitter's shot burst (cosmetic, render shell only). Default no-op; Simulation forwards it as OnShotBurst.
+    void NotifyShotBurst(EntityId id, Vector2 pos, int team) { }
     // A destroyed charged block detonated: the same cosmetic channel as above, sized by
     // the blast's world-space radius so the render shell doesn't have to know the
     // entity's constants. Default no-op — only Simulation forwards it, as OnChargedBlast.

@@ -15,6 +15,7 @@ public enum EntityKind
     Turret,
     Bullet,
     EnergyBall,
+    SpitShot,       // the spitter plant's shot (SpitProjectile): an EnergyBall that hits like S1 and bursts
     StickyGrenade,
     LobbedArea,
     MassBall,       // eruption payload — coasting ball of build mass (see MassBall.cs)
