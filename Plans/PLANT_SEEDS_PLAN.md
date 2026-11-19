@@ -287,14 +287,14 @@ of it feeds back into the sim.
 Branch `plants`, worktree `.claude/worktrees/plants` (cut from main `dd0357c`, 2026-11-19).
 Supervisor integrates; parcels are built by subagents in their own worktrees and merged here.
 
-- [~] M0 Plumbing — bar swap (`F`), seed selection, cursor ghost, HUD
-- [~] M1 Plant base (root, growth, team, burial, cap, cost) + Spitter + its figure
-- [~] M2 Duel stage — adventure terrain walled with `Hardened` (§8a)
-- [ ] M3 Siege pod + figure (§4.4)
-- [ ] M4 Thorns: spreading, caps, reinforcement + tile art (§4.3)
-- [ ] M5 Snapper + figure (§4.2)
-- [ ] M6 Block-eater + tile art (§4.5)
-- [ ] M7 Economy: seeds on the build meter (§6.1). Avalanche retune (§6.2) is feel work — not done here
+- [x] M0 Plumbing — bar swap (`F`), seed selection, cursor ghost, HUD @c96def0
+- [x] M1 Plant base (root, growth, team, burial, cap, cost) + Spitter + its figure @c96def0 (figure, ghost, HUD not yet seen on screen)
+- [x] M2 Duel stage `garden` — adventure terrain walled with `Hardened` (§8a) @fbcb20c (not yet run in game)
+- [~] M3 Siege pod (§4.4) — figure merged @fbcb20c; firing mechanics in flight; entity wrapper to do
+- [~] M4 Thorns: spreading, caps, reinforcement + tile art (§4.3)
+- [~] M5 Snapper (§4.2) — figure merged @fbcb20c; entity in flight
+- [~] M6 Block-eater + tile art (§4.5)
+- [x] M7 Economy: seeds on the build meter (§6.1), done with M1. Avalanche retune (§6.2) is feel work — not done here
 - [ ] M8 Bots: the three behaviours in §8b
 - [ ] M9 Full sweep, web build check, docs (overview + area maps)
 
@@ -302,6 +302,17 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
 
 (one line per milestone: what, commit, tests)
 
+- M0+M1 foundation — c96def0, 9ab685b, c00117b. 29 plant tests green. Contracts for the other
+  plants are in the header comment of `Entities/Plants/PlantEntity.cs` and in `SeedPlanting.cs`.
+  Deviation: a buried plant can still be hit through its covering block (see Decisions needed).
+- M2 stage + snapper figure + siege pod figure merged — fbcb20c. Build green; 62 plant / garden /
+  snapshot / input-codec tests green.
+- Baseline reds: the combat+terrain+simcore groups show ~40 reds outside plant code, over a dozen
+  of them not in BACKLOG §5's table. To be triaged at M9, not assumed pre-existing.
+
 ## Decisions needed
 
-(none yet)
+- **Can a buried plant be hit through the block covering it?** Today yes: hit occlusion never
+  counts the target's own cell. Burying your own plant to shelter it (§5) therefore protects it
+  from line-of-sight attacks coming from elsewhere but not from a swing at the block itself.
+  Options: leave it; or make a buried plant unhittable until the block is broken.
