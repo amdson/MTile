@@ -1107,6 +1107,13 @@ public class Game1 : Game
                 mouseState.ScrollWheelValue, mouseState.LeftButton, mouseState.MiddleButton,
                 mouseState.RightButton, mouseState.XButton1, mouseState.XButton2);
         var viewport = GraphicsDevice.Viewport;
+        if (_screenshots.MouseOverride is var (mfx, mfy))
+        {
+            _mouseScreen = new Point((int)(mfx * viewport.Width / _dpiScale), (int)(mfy * viewport.Height / _dpiScale));
+            mouseState = new MouseState((int)(mfx * viewport.Width), (int)(mfy * viewport.Height),
+                mouseState.ScrollWheelValue, mouseState.LeftButton, mouseState.MiddleButton,
+                mouseState.RightButton, mouseState.XButton1, mouseState.XButton2);
+        }
         _screenCenter = new Vector2(viewport.Width / 2f, viewport.Height / 2f);
         var mouseWorldPos = _camera.ScreenToWorld(mouseState.Position.ToVector2(), _screenCenter);
 

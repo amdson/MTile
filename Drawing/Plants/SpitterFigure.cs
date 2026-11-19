@@ -163,14 +163,31 @@ public sealed class SpitterFigure
         var p = new Pose();
         float ry = PlantFigureKit.RootY;
         var c = PlantPalette.Dormant;
+        // Kept inside its own cell (half-size RootY): the bud sits in the block covering
+        // it, so nothing may poke out of the block and read as an awake plant.
         var baseP = new Vector2(0f, ry - 0.5f);
-        var head  = new Vector2(0f, ry - 9f);
+        var head  = new Vector2(0f, ry - 6f);
         p.Line(baseP, head, c, 1f);
         // Leaves folded up against the bud.
-        PlantFigureKit.LeafOutline(p, new Vector2(-0.6f, ry - 1f), -MathHelper.PiOver2 - 0.45f, 5f, 2f, c);
-        PlantFigureKit.LeafOutline(p, new Vector2(0.6f, ry - 1f),  -MathHelper.PiOver2 + 0.45f, 5f, 2f, c);
-        p.Ring(head + new Vector2(0f, -2f), 2.6f, _team * 0.8f, 8, 1f);
-        p.Line(head + new Vector2(-1.5f, -2f), head + new Vector2(1.5f, -2f), c, 1f);
+        PlantFigureKit.LeafOutline(p, new Vector2(-0.6f, ry - 1f), -MathHelper.PiOver2 - 0.5f, 3.6f, 1.8f, c);
+        PlantFigureKit.LeafOutline(p, new Vector2(0.6f, ry - 1f),  -MathHelper.PiOver2 + 0.5f, 3.6f, 1.8f, c);
+        p.Ring(head + new Vector2(0f, -1.8f), 2.2f, _team * 0.8f, 8, 1f);
+        p.Line(head + new Vector2(-1.2f, -1.8f), head + new Vector2(1.2f, -1.8f), c, 1f);
         return p;
+    }
+
+    // The spitter's shot (render-only): a lime seed-glob with a pale highlight and a ring
+    // in the owner's colour, so a spit reads as the plant's and as whose — the stock
+    // EnergyBall sprite is an orange-red bullet that looks like the red team's on either
+    // side. One shared Pose per team; each projectile gets its own Sprite.
+    private static readonly Dictionary<int, Pose> _spit = new();
+    public static Sprite SpitSprite(int team)
+    {
+        if (!_spit.TryGetValue(team, out var pose))
+            _spit[team] = pose = new Pose()
+                .Disc(Vector2.Zero, 3.4f, PlantFigureKit.Scale(PlantPalette.Spit, 0.8f))
+                .Disc(new Vector2(-0.9f, -0.9f), 1.4f, Color.Lerp(PlantPalette.Spit, Color.White, 0.6f))
+                .Ring(Vector2.Zero, 3.6f, PlantPalette.Team(team), 10, 1.2f);
+        return new Sprite { Pose = pose };
     }
 }

@@ -106,12 +106,14 @@ public static class SnapperFigure
                 break;
             }
             case State.Dormant:
-                Plant(b, team, g, nx: dir * 3f, hf: 0.75f, phi: dir > 0 ? 0.9f : -MathHelper.Pi - 0.9f,
+                // Curled up small INSIDE its own (covered) cell — callers pass growth01 0 — so
+                // no jaw pokes out of the block on top of it and reads as an awake plant.
+                Plant(b, team, g, nx: dir * 1.5f, hf: 0.75f, phi: dir > 0 ? -0.6f : -MathHelper.Pi + 0.6f,
                       open: 0.04f, armed: 0f, flash: 0f, lunge: 0f);
                 // an X over the head: 'something is under here, inert'
                 var c = V(dir * 4.5f * g, -StalkHeight * g * 0.6f);
-                b.Line(c + V(-3f, -3f), c + V(3f, 3f), team, 1f);
-                b.Line(c + V(-3f, 3f), c + V(3f, -3f), team, 1f);
+                b.Line(c + V(-2.5f, -2.5f), c + V(2.5f, 2.5f), team, 1f);
+                b.Line(c + V(-2.5f, 2.5f), c + V(2.5f, -2.5f), team, 1f);
                 break;
             case State.Wilt:
                 Wilt(b, team, g, dir, time);

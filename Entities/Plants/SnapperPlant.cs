@@ -252,7 +252,8 @@ public sealed class SnapperAnims
     {
         float lean = facing;
         float g = s is SnapperFigure.State.Seed or SnapperFigure.State.Sprout
-            ? (bucket + 0.5f) / GrowthBuckets : 1f;
+            ? (bucket + 0.5f) / GrowthBuckets
+            : s == SnapperFigure.State.Dormant ? 0f : 1f;   // dormant curls up to fit its cell
         float r = (bucket + 0.5f) / RearmBuckets;
         Pose At(float time) => SnapperFigure.Build(s, g, lean, r, SnapperFigure.RootFace.Floor, _team, time);
 
