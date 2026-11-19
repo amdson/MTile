@@ -80,8 +80,12 @@ public static class BotDuel
 
     // One bout: `p1` drives the primary, `p2` the secondary.
     public static Result Run(string arena, DuelBot p1, DuelBot p2, int seed, int frames = DefaultFrames)
+        => Run(BuildArena(arena), arena, p1, p2, seed, frames);
+
+    // One bout on an already-built Versus sim (an arena outside Arenas, e.g. a stage with
+    // its own terrain file); `arena` is only the label.
+    public static Result Run(Simulation sim, string arena, DuelBot p1, DuelBot p2, int seed, int frames = DefaultFrames)
     {
-        var sim = BuildArena(arena);
         var a = p1(-1, seed * 2 + 1);
         var b = p2(0, seed * 2 + 2);
         var r = new Result { Arena = arena, Seed = seed };

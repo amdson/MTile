@@ -81,6 +81,7 @@ public sealed class BulldogBot : IRemoteInputSource
     private readonly Random            _rng;
     private readonly int               _selfIndex;
     private readonly List<BotManeuver> _maneuvers;
+    private readonly PlantSpitterManeuver _planter = new();
     private readonly BotView           _view = new();
     private readonly BulldogSense      _sense = new();
     private BotController _controller;
@@ -126,6 +127,10 @@ public sealed class BulldogBot : IRemoteInputSource
             // Added by the arbiter after the re-run (not the author's): wall off a crystal
             // wave, nothing else.
             new WallUpManeuver { CrystalOnly = true },
+            // Plants (Plans/PLANT_SEEDS_PLAN.md §8b), both low bets gated on a quiet
+            // opponent: plant a spitter when far apart, swing at an opposing plant in reach.
+            _planter,
+            new PlantStrikeManeuver(),
         };
         if (extra != null) _maneuvers.AddRange(extra);
     }
@@ -158,6 +163,9 @@ public sealed class BulldogBot : IRemoteInputSource
         foreach (var m in _maneuvers)
             if (!Disabled.Contains(m.Name)) c.Add(new ManeuverBehaviour(m));
         c.Add(new SpikeGuardConstraint(Spikes));   // shared spike sense, last pass
+        // Never leave the seed bar selected outside the planter's own script (it is sticky
+        // sim state: block/spike maneuvers would plant seeds instead).
+        c.Add(new SeedBarReturnConstraint(Disabled.Contains(_planter.Name) ? null : _planter));
         return c;
     }
 
