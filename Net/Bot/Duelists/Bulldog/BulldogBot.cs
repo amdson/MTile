@@ -131,6 +131,8 @@ public sealed class BulldogBot : IRemoteInputSource
             // opponent: plant a spitter when far apart, swing at an opposing plant in reach.
             _planter,
             new PlantStrikeManeuver(),
+            // A reflex: step out of a siege pod's lane / blast disc in its last 2 s.
+            new SiegeDodgeManeuver(),
         };
         if (extra != null) _maneuvers.AddRange(extra);
     }

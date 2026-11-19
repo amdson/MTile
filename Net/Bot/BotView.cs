@@ -83,6 +83,26 @@ public sealed class BotView
         }
     }
 
+    // Live siege pods that have not fired yet, ANY owner: the shot is Faction.Hazard and
+    // hits everyone, the planter included. Read live (the telegraph is public); refreshed
+    // lazily once per Poll frame like OpposingPlants.
+    private readonly System.Collections.Generic.List<SiegePodPlant> _siegePods = new();
+    private int _podsFrame = int.MinValue;
+
+    public System.Collections.Generic.IReadOnlyList<SiegePodPlant> SiegePods
+    {
+        get
+        {
+            if (_podsFrame == Frame) return _siegePods;
+            _podsFrame = Frame;
+            _siegePods.Clear();
+            if (Sim == null) return _siegePods;
+            foreach (var e in Sim.Entities)
+                if (e is SiegePodPlant p && !p.IsDead && !p.HasFired) _siegePods.Add(p);
+            return _siegePods;
+        }
+    }
+
     // ── Terrain probes ──────────────────────────────────────────────────────────
 
     public static Point Cell(Vector2 world) => new(
