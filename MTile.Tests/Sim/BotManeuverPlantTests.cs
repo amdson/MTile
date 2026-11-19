@@ -203,4 +203,57 @@ public class BotManeuverPlantTests(ITestOutputHelper output)
         Assert.False(mine.IsDead);
         Assert.Equal(hp0, mine.Health);
     }
+
+    // ── Siege pod dodge ─────────────────────────────────────────────────────
+
+    // P1's pod at `podCol`, aimed straight up (default aim), aged `age` seconds with both
+    // players standing still before the bot is switched on.
+    private static (Duel d, SiegePodPlant pod) WithPod(int podCol, float age)
+    {
+        SiegePodPlant pod = null;
+        var d = Make(setup: (sim, p2) =>
+        {
+            pod = new SiegePodPlant(new PlantSite(podCol, Row, PlantRoot.Below), sim.Player.Id,
+                                    sim.Player.Faction, sim.Player.Team, Vector2.Zero);
+            sim.SpawnEntity(pod);
+        });
+        Run2(d.Sim, age);
+        return (d, pod);
+    }
+
+    private static SiegeDodgeManeuver Dodger(Duel d) => d.Bot.Maneuvers.OfType<SiegeDodgeManeuver>().Single();
+
+    [Fact]
+    public void Siege_OnTheLine_StepsOffBeforeTheShot_AndTakesNoDamage()
+    {
+        var (d, pod) = WithPod(BotCol - 2, PlantTuning.SiegePodGrowSeconds - 1.8f);   // bot inside the disc
+        Assert.False(pod.HasFired);
+        float hp0 = d.P2.Combat.DamageTaken;
+        for (int f = 0; f < 180 && !pod.HasFired; f++) d.Step();
+        for (int f = 0; f < 10; f++) d.Step();
+        output.WriteLine($"fired {pod.HasFired}; dodges {Dodger(d).Dodges}; P2 at {d.P2.Body.Position} muzzle {pod.Muzzle}; dmg {d.P2.Combat.DamageTaken - hp0}");
+        Assert.True(pod.HasFired);
+        Assert.True(Dodger(d).Dodges > 0, "the dodge reflex should have run");
+        Assert.Equal(hp0, d.P2.Combat.DamageTaken);
+    }
+
+    [Fact]
+    public void Siege_OffTheLine_DoesNotReact()
+    {
+        var (d, pod) = WithPod(BotCol + 15, PlantTuning.SiegePodGrowSeconds - 1.8f);   // behind the bot, which chases left
+        for (int f = 0; f < 180 && !pod.HasFired; f++) d.Step();
+        Assert.True(pod.HasFired);
+        Assert.Equal(0, Dodger(d).Dodges);
+    }
+
+    [Fact]
+    public void Siege_EarlyInGrowth_DoesNothing()
+    {
+        var (d, pod) = WithPod(BotCol - 2, 5f);
+        var v = View(d.Sim, d.P2, d.P1, 999);
+        Assert.False(new SiegeDodgeManeuver().Bet(v).Applicable);
+        for (int f = 0; f < 90; f++) d.Step();
+        Assert.Equal(0, Dodger(d).Dodges);
+        Assert.False(pod.HasFired);
+    }
 }
