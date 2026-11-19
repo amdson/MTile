@@ -295,8 +295,8 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
 - [x] M5 Snapper (§4.2) @43c00e9 (not yet seen on screen; guard interaction asserted by damage tier only)
 - [x] M6 Block-eater + tile art (§4.5) @abd94f0, hooked to the seed bar (art not yet seen on screen)
 - [x] M7 Economy: seeds on the build meter (§6.1), done with M1. Avalanche retune (§6.2) is feel work — not done here
-- [~] M8 Bots: plant-a-spitter and hit-a-plant merged @914eea6 (all Bulldog-family bots); siege-line dodge in flight
-- [ ] M9 Full sweep, web build check, docs (overview + area maps)
+- [x] M8 Bots: plant-a-spitter, hit-a-plant @914eea6 and siege-line dodge @a733736 (Bulldog, Harrier, Ranger)
+- [~] M9 Web build green (supervisor, after M8); docs in flight; full sweep NOT run (user asked for less verification)
 
 ## Campaign log
 
@@ -332,8 +332,15 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
   (team-coloured spit, buried figures fit their cell, HUD label overlap, label alignment, per-seed
   swatch glyphs). Spitter, snapper, thorns, block-eater, ghost, HUD and the garden stage have now
   been seen in the real renderer. The siege pod has NOT. 132 tests green.
-- Baseline reds: the combat+terrain+simcore groups show ~40 reds outside plant code, over a dozen
-  of them not in BACKLOG §5's table. To be triaged at M9, not assumed pre-existing.
+- M8 siege-line dodge merged. `MTile.sln` and `MTile.Web.csproj` both build. 166 plant / bot-plant /
+  garden / snapshot / input-codec tests green.
+- Non-plant reds: a 75-red run of combat+terrain+simcore was taken on 87ef309 + the siege firing
+  file only (no seed bar, no plant base), i.e. effectively the base. 30 of its 37 classes are in
+  BACKLOG §5; the 7 that are not (13 tests: BotManeuverAvalancheCrush, BotManeuverPulseGuard,
+  CombatGroundAdvantage, CommitmentSpectrum, DashTests, FighterDashMine, SlashComboPresentation)
+  are being added to that table. The combat group on the finished branch shows 50 reds, none in
+  plant code. `ConfigLayoutTests.ShippedMovementConfigMatches…` is red on the base too. No full
+  sweep was run on the finished branch.
 
 ## Decisions needed
 
