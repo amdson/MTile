@@ -10,6 +10,7 @@ Boundary: rig solving, clips and `CharacterAnimator` are `Animation/` (Drawing o
 ## Files
 - `DrawContext.cs` (102): the immediate primitive API over `SpriteBatch` + 1x1 pixel: `Line/Dashed/Box/Rect/RotatedRect/Ring/Stamp/Disc`. Stateless; Begin/End is Game1's. It is the only primitive helper, but not the only pixel drawer: ChunkRenderer, BackWallRenderer, GrassField, DebugOverlayRenderer and the HUDs call `SpriteBatch.Draw(pixel, Rectangle)` directly.
 - `Shape.cs`, `Sprite.cs`, `Sprites.cs`, `PrismFigure.cs`, `QuillbackFigure.cs`: vector sprites.
+  `Plants/SiegePodFigure.cs`: the siege pod plant (parametric: pose, growth, aim, root face, team colour; cached `Get`, uncached `Build`).
   `Pose` = list of `Shape`s in local space; `Sprite.Draw(DrawContext)`; `AnimatedSprite` swaps poses; `Sprites.*` are vector-sprite factories (Sprites.cs 479 lines: Player, Ball, Balloon, Bullet, and one per enemy kind), called from entity ctors.
 - `PrimitiveBatch.cs`: vertex-colored triangles via `DrawUserPrimitives` + `BasicEffect`; must run OUTSIDE a SpriteBatch Begin/End. `Primitives.cs`: CPU tessellation (curve ribbons, surface grids) that emits into a begun PrimitiveBatch.
 - `ChunkRenderer.cs` (643): world geometry pass (see index). `TilePalette`, `TileVariation`, `TileTextureAtlas`, `MassOrbTextures`: tile colors, per-cell brightness noise, grain atlas (96px patches), clod-disc textures cut from the atlas.

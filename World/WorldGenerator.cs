@@ -83,6 +83,15 @@ public class WorldGenConfig
     public float DirtPocketLevel { get; set; } = 0.32f;   // pocket noise above this → Dirt
     public float SandPocketLevel { get; set; } = 0.48f;   // …below its negation → Sand
 
+    // ── Boundary (optional) ────────────────────────────────────────────────────
+    // 0 = endless (the default; generation is then bit-for-bit what it always was).
+    // N > 0 closes the world: every column with |worldTileX| > N is TileType.Hardened
+    // from BoundaryHeadroom tiles above the tallest possible ground (GroundLevel -
+    // MaxHeight) all the way down, so players cannot leave and nothing past the wall
+    // is ever anything but Hardened.
+    public int   BoundaryHalfWidth { get; set; } = 0;
+    public float BoundaryHeadroom  { get; set; } = 200f;
+
     // ── Streaming ──────────────────────────────────────────────────────────────
     // Chunk radius kept resident around each player. Horizontal is larger because
     // the view is wider than it is tall and the player travels sideways.
@@ -142,6 +151,11 @@ public sealed class WorldGenerator : IChunkGenerator
     public int SurfaceY(int worldTileX)
         => _cfg.GroundLevel - (int)MathF.Round(HeightAt(worldTileX));
 
+    // World tile Y of the top of the boundary wall (only meaningful when
+    // BoundaryHalfWidth > 0): above the tallest possible hill plus headroom.
+    public int WallTopY
+        => _cfg.GroundLevel - (int)MathF.Ceiling(_cfg.MaxHeight + _cfg.BoundaryHeadroom);
+
     public void Generate(Chunk chunk)
     {
         int baseX = chunk.ChunkPos.X * Chunk.Size;
@@ -159,8 +173,22 @@ public sealed class WorldGenerator : IChunkGenerator
             surface[i] = _cfg.GroundLevel - (int)MathF.Round(height[i]);
         }
 
+        int wallTop = WallTopY;
         for (int tx = 0; tx < Chunk.Size; tx++)
         {
+            if (_cfg.BoundaryHalfWidth > 0 && Math.Abs(baseX + tx) > _cfg.BoundaryHalfWidth)
+            {
+                // Wall column: Hardened from wallTop down, no noise, no material layering.
+                int from = Math.Max(wallTop - baseY, 0);
+                for (int ty = from; ty < Chunk.Size; ty++)
+                {
+                    ref var w = ref chunk.Tiles[tx, ty];
+                    w.State = TileState.Solid;
+                    w.Type  = TileType.Hardened;
+                }
+                continue;
+            }
+
             int surfaceY = surface[tx + 1];
             // Nothing to write in a column whose ground is below this chunk.
             if (baseY + Chunk.Size <= surfaceY) continue;

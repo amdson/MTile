@@ -12,6 +12,7 @@ public static class LobbyStages
     public static readonly LobbyStage[] All =
     {
         new("adventure", "Adventure", false),
+        new("garden",   "Garden",   false),
         new("prism",    "Prism",    false),
         new("depths",   "Depths",   true),
         new("duel_hall",  "Duel Hall",  false),
