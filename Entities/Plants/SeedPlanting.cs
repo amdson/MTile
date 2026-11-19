@@ -18,7 +18,7 @@ public static class SeedPlanting
     {
         SeedKind.Spitter    => true,
         SeedKind.Snapper    => false,   // milestone M5
-        SeedKind.Thorns     => false,   // milestone M4
+        SeedKind.Thorns     => true,
         SeedKind.SiegePod   => false,   // milestone M3
         SeedKind.BlockEater => false,   // milestone M6
         _                   => false,
@@ -47,7 +47,11 @@ public static class SeedPlanting
             case SeedKind.Snapper:
                 return false; // filled by milestone M5
             case SeedKind.Thorns:
-                return false; // filled by milestone M4
+                // Not an entity: a thorn patch is tile state (World/ThornPatches.cs). Evaluate
+                // already asked CanPlantThornPatch this frame, so the plant cannot fail after
+                // the spend.
+                if (meters != null && !meters.TrySpendUnits(PlantTuning.CostFor(req.Seed))) return false;
+                return chunks.TryPlantThornPatch(req.CellX, req.CellY, (byte)req.Team);
             case SeedKind.SiegePod:
                 return false; // filled by milestone M3 (req.Aim is the drag vector)
             case SeedKind.BlockEater:

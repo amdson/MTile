@@ -106,13 +106,28 @@ public class PlantRulesTests
         var sim = Make();
         Run(sim, 0.5f);
         var p = sim.Player;
-        foreach (var k in new[] { SeedKind.Snapper, SeedKind.Thorns, SeedKind.SiegePod, SeedKind.BlockEater })
+        foreach (var k in System.Enum.GetValues<SeedKind>().Where(k => !SeedPlanting.IsImplemented(k)))
         {
             Assert.Equal(PlantVerdict.NotImplemented,
                 PlantRules.Evaluate(Request(p, 6, Row, k), sim.Chunks, sim.Entities, null, out _));
             Assert.False(SeedPlanting.TryPlant(Request(p, 6, Row, k), null, sim.Chunks, sim));
         }
         Assert.Empty(Plants(sim));
+    }
+
+    [Fact]
+    public void Thorns_PlantThroughTheEntryPoint_AsATilePatch_NotAnEntity()
+    {
+        var sim = Make();
+        Run(sim, 0.5f);
+        var p = sim.Player;
+        Assert.Equal(PlantVerdict.Ok,
+            PlantRules.Evaluate(Request(p, 6, Row, SeedKind.Thorns), sim.Chunks, sim.Entities, null, out _));
+        Assert.True(SeedPlanting.TryPlant(Request(p, 6, Row, SeedKind.Thorns), null, sim.Chunks, sim));
+        Assert.True(sim.Chunks.Thorns.IsSeedCell(6, Row));
+        Assert.Empty(Plants(sim));
+        // The same cell cannot take a second patch.
+        Assert.False(SeedPlanting.TryPlant(Request(p, 6, Row, SeedKind.Thorns), null, sim.Chunks, sim));
     }
 
     [Fact]

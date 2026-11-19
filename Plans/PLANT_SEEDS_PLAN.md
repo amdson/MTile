@@ -291,7 +291,7 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
 - [x] M1 Plant base (root, growth, team, burial, cap, cost) + Spitter + its figure @c96def0 (figure, ghost, HUD not yet seen on screen)
 - [x] M2 Duel stage `garden` — adventure terrain walled with `Hardened` (§8a) @fbcb20c (not yet run in game)
 - [~] M3 Siege pod (§4.4) — figure merged @fbcb20c; firing mechanics in flight; entity wrapper to do
-- [~] M4 Thorns: spreading, caps, reinforcement + tile art (§4.3)
+- [x] M4 Thorns: spreading, caps, reinforcement + tile art (§4.3) @4e36f44, hooked to the seed bar (art not yet seen on screen)
 - [~] M5 Snapper (§4.2) — figure merged @fbcb20c; entity in flight
 - [~] M6 Block-eater + tile art (§4.5)
 - [x] M7 Economy: seeds on the build meter (§6.1), done with M1. Avalanche retune (§6.2) is feel work — not done here
@@ -307,10 +307,20 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
   Deviation: a buried plant can still be hit through its covering block (see Decisions needed).
 - M2 stage + snapper figure + siege pod figure merged — fbcb20c. Build green; 62 plant / garden /
   snapshot / input-codec tests green.
+- M4 thorns merged and hooked into `SeedPlanting` (thorns are tile state in `World/ThornPatches.cs`,
+  not an entity). 48 plant tests green. Same-swing rule: the first frame a swing covers both a
+  thorn and its block, the block takes the reduced damage and the thorn comes off; later frames
+  cut at full damage.
 - Baseline reds: the combat+terrain+simcore groups show ~40 reds outside plant code, over a dozen
   of them not in BACKLOG §5's table. To be triaged at M9, not assumed pre-existing.
 
 ## Decisions needed
+
+- **Hand-placed spikes are never knocked off by attacks today.** `CombatSystem`'s tile pass only
+  collects Solid cells, so no slash, beam or blast removes a hand-placed spike — "any hit knocks
+  it off" was lost when spikes became tiles (2026-11-07). Thorn-grown spikes ARE knocked off by
+  hits (new, thorn-only). Extending that to every spike is a one-line change but alters spike
+  gameplay, so it was not done.
 
 - **Can a buried plant be hit through the block covering it?** Today yes: hit occlusion never
   counts the target's own cell. Burying your own plant to shelter it (§5) therefore protects it

@@ -141,8 +141,8 @@ public static class PlantRules
     public static int CapFor(CapGroup g) => g switch
     {
         CapGroup.Plants => PlantTuning.PlantCapPerPlayer,
-        // filled by milestone M4 (thorn patch cap, start 2)
-        _               => 2,
+        // Thorns are not entities; their caps live in ThornPatches and are checked in Evaluate.
+        _               => int.MaxValue,
     };
 
     // Live plants of `owner` in `group`, in any order (a count is order-free).
@@ -174,6 +174,9 @@ public static class PlantRules
         if (!InReach(req.OwnerPos, req.CellX, req.CellY))     return PlantVerdict.OutOfReach;
         if (!TryFindSite(req.Seed, chunks, req.CellX, req.CellY, out site)) return PlantVerdict.NoRoot;
         if (Occupied(entities, req.CellX, req.CellY))         return PlantVerdict.Occupied;
+        // Thorns are tile state, capped by ThornPatches (patches and cells per team, §4.3).
+        if (req.Seed == SeedKind.Thorns && !chunks.CanPlantThornPatch(req.CellX, req.CellY, (byte)req.Team))
+            return PlantVerdict.CapReached;
         var g = GroupOf(req.Seed);
         if (LiveCount(entities, req.Owner, g) >= CapFor(g))   return PlantVerdict.CapReached;
         if (meters != null && meters.BuildMove + meters.EruptMove < PlantTuning.CostFor(req.Seed))
