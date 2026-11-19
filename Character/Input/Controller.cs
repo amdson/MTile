@@ -15,7 +15,8 @@ namespace MTile
         public Vector2 MouseWorldPosition;
         public bool Space;
         public bool Shift;
-        // F key. Currently unbound (it threw the sticky grenade, removed 2026-09-01 —
+        // F key. Swaps the block bar and the seed bar (PlayerCharacter, press edge). Before
+        // 2026-11-19 it was unbound (it threw the sticky grenade, removed 2026-09-01 —
         // superseded by the dirt-drag move); still sampled so the input record's
         // shape stays stable for replays.
         public bool F;

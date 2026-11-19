@@ -1,7 +1,8 @@
 # Plants — growable, owned threats that make terrain matter in PvP
 
-> Status: **proposed 2026-11-19, nothing implemented.** Design settled in conversation with the
-> user; §2 is decisions, §7 is what is still open. Numbers are starting points, to be kept as
+> Status: **built 2026-11-19 on branch `plants`** — see "Campaign status" and "Decisions needed" at
+> the end for what landed and what is open. Design settled in conversation with the user; §2 is
+> decisions. Numbers are starting points, to be kept as
 > named constants and tuned by feel.
 
 ## 1. The problem this answers
@@ -296,7 +297,7 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
 - [x] M6 Block-eater + tile art (§4.5) @abd94f0, hooked to the seed bar (art not yet seen on screen)
 - [x] M7 Economy: seeds on the build meter (§6.1), done with M1. Avalanche retune (§6.2) is feel work — not done here
 - [x] M8 Bots: plant-a-spitter, hit-a-plant @914eea6 and siege-line dodge @a733736 (Bulldog, Harrier, Ranger)
-- [~] M9 Web build green (supervisor, after M8); docs in flight; full sweep NOT run (user asked for less verification)
+- [x] M9 Web build green; docs merged @e27ec84. Full sweep NOT run (user asked for less verification)
 
 ## Campaign log
 
@@ -343,6 +344,11 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
   sweep was run on the finished branch.
 
 ## Decisions needed
+
+- **Prices.** `SeedPlanting` charges `PlantTuning.CostFor` (thorns 8 stone, block-eater 12, spitter 10,
+  snapper 12). `ThornPatches.BuildCost` and `BlockEaterInfection.BuildCost` (3 each) are unused
+  leftovers from the parcels; delete them or adopt them.
+- **Not yet seen on screen:** the siege pod (figure, wall aim, drag ghost, fire flash).
 
 - **Siege pod health.** The pod fires the moment it matures, so for its whole life it has only the
   0.5 seedling health — one poke kills it. That makes "kill the seed" a strong answer. If it should
