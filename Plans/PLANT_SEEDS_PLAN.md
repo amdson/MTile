@@ -290,7 +290,7 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
 - [x] M0 Plumbing — bar swap (`F`), seed selection, cursor ghost, HUD @c96def0
 - [x] M1 Plant base (root, growth, team, burial, cap, cost) + Spitter + its figure @c96def0 (figure, ghost, HUD not yet seen on screen)
 - [x] M2 Duel stage `garden` — adventure terrain walled with `Hardened` (§8a) @fbcb20c (not yet run in game)
-- [~] M3 Siege pod (§4.4) — figure @fbcb20c and firing mechanics (`Entities/Plants/SiegeBlast.cs`) @23a3058 merged; entity wrapper in flight
+- [x] M3 Siege pod (§4.4) — figure @fbcb20c, firing @23a3058, entity @e069a49 (not yet seen on screen)
 - [x] M4 Thorns: spreading, caps, reinforcement + tile art (§4.3) @4e36f44, hooked to the seed bar (art not yet seen on screen)
 - [x] M5 Snapper (§4.2) @43c00e9 (not yet seen on screen; guard interaction asserted by damage tier only)
 - [x] M6 Block-eater + tile art (§4.5) @abd94f0, hooked to the seed bar (art not yet seen on screen)
@@ -315,10 +315,23 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
 - Siege firing merged (23 tests; web project compiled by the parcel). The lance hits everyone via a
   new `Faction.Hazard` no hurtbox carries. Block-eater merged and hooked into `SeedPlanting`
   (tile state in `World/BlockEaterInfection.cs`, planted ON an enemy-owned block). 95 plant tests green.
+- M3 siege pod entity merged (fast-forward e069a49): aim on drag, one alive per player, fires once
+  at 20 s then lingers 0.35 s unhittable, hazard hits kill plants (base `PlantEntity.OnHit`).
+  Supervisor fix on top: burial drain is relative to the plant's current-stage health pool, so a
+  buried seedling or pod also takes ~10 s to die (was ~3.3 s). 146 plant / garden / snapshot tests
+  green; both hosts built by the parcel.
+- All five plants are plantable. Outstanding: visual QA, red triage vs base, bots, docs.
 - Baseline reds: the combat+terrain+simcore groups show ~40 reds outside plant code, over a dozen
   of them not in BACKLOG §5's table. To be triaged at M9, not assumed pre-existing.
 
 ## Decisions needed
+
+- **Siege pod health.** The pod fires the moment it matures, so for its whole life it has only the
+  0.5 seedling health — one poke kills it. That makes "kill the seed" a strong answer. If it should
+  be sturdier while growing, give it its own seedling health.
+- **Siege pod cost under code-default material costs** is 64 units, more than the 48-unit working
+  pool; with the shipped `configs/material_strengths.json` it is ~31 and fits. Only matters if the
+  config fails to load.
 
 - **Hand-placed spikes are never knocked off by attacks today.** `CombatSystem`'s tile pass only
   collects Solid cells, so no slash, beam or blast removes a hand-placed spike — "any hit knocks

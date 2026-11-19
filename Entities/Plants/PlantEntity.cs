@@ -84,7 +84,10 @@ public abstract class PlantEntity : Entity, ITelegraphSource
 
         if (Dormant)
         {
-            Health -= MaxHealth / PlantTuning.BuryKillSeconds * dt;
+            // Drain against the pool the plant has at its current stage, so a full-health
+            // plant suffocates in BuryKillSeconds whether it is a seedling or mature (§5).
+            float pool = IsMature ? MaxHealth : MathF.Min(PlantTuning.SeedlingHealth, MaxHealth);
+            Health -= pool / PlantTuning.BuryKillSeconds * dt;
             OnSuppressed();
             return;
         }
