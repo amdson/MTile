@@ -7,7 +7,15 @@ namespace MTile;
 // own faction (Player1/Player2) so the two can damage each other while still being
 // self-immune; NPC code that means "any player" must use Factions.IsPlayer, not an
 // equality check. Add Player3/… here if more local players are ever needed.
-public enum Faction { Player1, Player2, Enemy, Neutral }
+//
+// Hazard is a hitbox-only faction: no body or entity ever carries it, so the
+// "same faction ⇒ skip" rule never fires and a Hazard hitbox lands on EVERY hurtbox —
+// players of either side (including whoever caused it), Enemy-faction entities and
+// Neutral ones alike. Neutral is not enough for that: Entity's default faction is
+// Neutral, so a Neutral hitbox silently skips every Neutral entity. Used by the siege
+// pod (Entities/Plants/SiegeBlast.cs, plan decision 9: not team-filtered). Appended
+// last so existing values (snapshotted as bytes) keep their numbers.
+public enum Faction { Player1, Player2, Enemy, Neutral, Hazard }
 
 public static class Factions
 {
