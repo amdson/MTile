@@ -30,6 +30,8 @@ public sealed class TerrainSnapshot
     public Dictionary<(int gtx, int gty), BlockOwnership.Claim>     Ownership;
     // ── Thorns ──
     public ThornPatches.Data Thorns;
+    // ── Block-eater ──
+    public Dictionary<(int gtx, int gty), BlockEaterInfection.Cell> BlockEater;
     public float SproutClock;
     public int   TerrainFrame;
 }

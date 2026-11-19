@@ -80,6 +80,16 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     public bool CanPlantThornPatch(int gtx, int gty, byte team)
         => Thorns.CanPlant(this, gtx, gty, team);
     // ── end Thorns ──────────────────────────────────────────────────────────────
+    // ── Block-eater ──
+    // Sparse per-cell plant infection (Plans/PLANT_SEEDS_PLAN.md §4.5): chews enemy-owned
+    // blocks through DamageCell and spreads through contiguous enemy-owned cells. Ticked in
+    // TickSprouts, cleared in BreakCell/EditorSetCell, snapshotted. See BlockEaterInfection.
+    public readonly BlockEaterInfection BlockEater = new();
+
+    // Planting hook API. `team` is a BlockOwnership owner id (BlockOwnership.OwnerFor).
+    public bool CanPlantBlockEater(int gtx, int gty, byte team) => BlockEater.CanPlant(this, gtx, gty, team);
+    public bool TryPlantBlockEater(int gtx, int gty, byte team) => BlockEater.TryPlant(this, gtx, gty, team);
+    // ── end Block-eater ──
 
     // Register/refresh a wave's identity from its ball. Called on every deposit;
     // direction locks on the first nonzero-velocity touch (the ball never turns).
@@ -661,6 +671,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Crystals.Tick(this, TerrainFrame);
 
         Foam.Tick(dt, _breakCellAction);
+        // ── Block-eater ── chew + spread (may break cells through DamageCell).
+        BlockEater.Tick(this, TerrainFrame);
         // Bleed stale partial build mass so the table stays bounded (see TileMassField).
         Mass.Tick(dt);
 
@@ -908,6 +920,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Charge.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);
         Waves.ForgetCell(gtx, gty);
+        BlockEater.Clear(gtx, gty);   // ── Block-eater ──
         // Spikes clinging only to this cell fall with it (no refund: see TileSpikeSeeds).
         ClearOrphanedSpikesAround(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
@@ -946,6 +959,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Foam.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);   // an edit is level data: nobody owns it
         Waves.ForgetCell(gtx, gty);
+        BlockEater.Clear(gtx, gty);   // ── Block-eater ──
         if (state == TileState.Empty) { DropSupportFor(gtx, gty); ClearOrphanedSpikesAround(gtx, gty); }
         return true;
     }
@@ -991,6 +1005,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         WaveCells   = Waves.CaptureCells(),
         Ownership   = Ownership.Capture(),
         Thorns      = Thorns.Capture(),   // ── Thorns ──
+        BlockEater  = BlockEater.Capture(),   // ── Block-eater ──
         SproutClock = SproutClock,
         TerrainFrame = TerrainFrame,
     };
@@ -1013,6 +1028,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Waves.Restore(s.Waves, s.WaveCells);
         Ownership.Restore(s.Ownership);
         Thorns.Restore(s.Thorns);   // ── Thorns ──
+        BlockEater.Restore(s.BlockEater);     // ── Block-eater ──
         SproutClock = s.SproutClock;
         TerrainFrame = s.TerrainFrame;
 

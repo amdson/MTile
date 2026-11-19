@@ -783,6 +783,14 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
                        0x32 ^ ((ulong)p.Team << 8) ^ ((ulong)(uint)p.Id << 16)
                             ^ ((ulong)(uint)p.NextGrowFrame * 0x9E3779B1UL)
                             ^ ((ulong)(uint)p.PlantedFrame << 40) ^ ((p.Spreading ? 1UL : 0UL) << 63));
+        // ── Block-eater ── team, origin side and infected frame ride the salt; the patch
+        // identity (heart cell + plant frame) rides the value slot as a mixed int.
+        foreach (var d in _chunks.BlockEater.Entries)
+        {
+            var c = d.Value;
+            t ^= CellF(d.Key.gtx, d.Key.gty, (float)(c.HeartGtx * 73856093 ^ c.HeartGty * 19349663 ^ c.PlantFrame),
+                       0x1E ^ ((ulong)c.Team << 8) ^ ((ulong)c.From << 12) ^ ((ulong)(uint)c.InfectedFrame << 16));
+        }
 
         Mix((uint)t); Mix((uint)(t >> 32));
         return h;

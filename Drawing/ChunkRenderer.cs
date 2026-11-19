@@ -15,6 +15,7 @@ public sealed class ChunkRenderer
     private readonly Camera         _camera;
     private readonly GraphicsDevice _graphicsDevice;
     private readonly BackWallRenderer _backWall;
+    private BlockEaterRenderer _blockEater;   // Block-eater tile art, created on first draw
     // Optional grain atlas for tile fills; null → flat palette fills.
     public TileTextureAtlas Atlas;
     // Launched-avalanche fill zone to shade (Game1 sets it; null → none).
@@ -60,6 +61,8 @@ public sealed class ChunkRenderer
         _grass.Draw(_spriteBatch, _pixel, chunks, _visMinX, _visMinY, _visMaxX, _visMaxY);
 
         DrawOwnership(chunks);
+        // Block-eater vines over infected cells (Drawing/BlockEaterRenderer.cs).
+        (_blockEater ??= new BlockEaterRenderer(_spriteBatch, _pixel)).Draw(chunks, _camera, _graphicsDevice.Viewport, time);
         DrawSpikes(chunks);
         DrawSpikeSeeds(chunks);
         DrawThorns(chunks);   // ── Thorns ── (Drawing/ThornRenderer.cs)
