@@ -1,5 +1,5 @@
 # Character/Action map
-Verified against: 4e34142 (2026-11-14)
+Verified against: e5b75c6 (2026-11-19)
 Covers: Character/Action/*.cs, Character/Action/action_states_notes.md (callers read in Character/PlayerCharacter.cs, Character/Sensing/EnvironmentContext.cs, Character/Input/IntentBuffer.cs)
 
 ## What this area is
@@ -39,7 +39,7 @@ Boundary: `PlayerCharacter` (Character/PlayerCharacter.cs) owns the registry and
 - 2568 `PulseAction` 30/30: `Circle` intent, 12-segment ring.
 - 2717 `BurstAction` 30/30: RMB edge during a charging `RecoveryAction`; near box, then a 5-segment fan, each a TilesOnly + EntitiesOnly box pair.
 - 2977 `BlockPaintAction` 8/10: plain RMB, `NeutralForEntry`; `Exit` may spawn a `MassBall` (fast release with banked charge).
-- 3234 `BlockPlaceAction` 8/10: Shift+RMB, `NeutralForEntry`.
+- 3299 `BlockPlaceAction` 8/10: Shift+RMB (or plain RMB on the seed bar, "seed mode"), `NeutralForEntry`. Seed mode plants once per RMB press through `SeedPlanting.TryPlant` (Enter), the siege pod on release (Exit; a preempt or bar swap forfeits it); `BlockPaintAction` (3039) declines on the seed bar.
 - 3309 `BlockEruptionHelpers` (internal static: cursor/solid tests, `TryChargeBlock` 3383, `RecruitChargedBlocks` 3416).
 - 3463 `LobbedAreaAction` 40/45: NOT in the registry (see traps).
 - 3644 `BlockGrabAction` 46/46: Shift+LMB press on terrain; spawns `PullPointEntity` in `Enter` 3752; `HoldTarget` 3848.
@@ -92,6 +92,8 @@ Rollback: `CaptureState` writes the ECS `PlayerData` component (Sim/ECS/Componen
 - Slash direction is hemisphere-clamped to `Facing` unless `AllowBackward` (:704, :836-843); `AirTurnSlash` and `AirWhipKick` flip `ab.Facing` in `Enter` (:1220, :1983).
 - `Hitbox.Damage` is the TILE number; `BodyDamage` is HP (see `bodyDamage:` args, e.g. :880). Two boxes sharing a `HitId` dedupe per target in publish order (sweet spot first in Kick/Hammer; Stab adds a tiles-only block box, Burst splits TilesOnly/EntitiesOnly boxes).
 - New `ActionState` subclass needs: a registry line in `PlayerCharacter` ctor (:546-573, else it never runs; registry order is the tie-break), and a clip whose `Type` equals the class name unless listed in `ClipBindingTests.NoOverlay` (an action that declines `AnimationProgress` needs a looping clip).
+- Seed mode latches `vars.SeedMode` at the press; swapping bars mid-hold ends the action. A hold resumed after an attack preempted it is not armed (no press edge) and plants nothing.
+- Bots using the seed bar must end on the BLOCK bar: leave it on and every later RMB plants and Num keys pick seeds (`SeedBarReturnConstraint`, Net/Bot/Maneuvers/PlantManeuvers.cs:180).
 
 ## Where to change X
 - Attack timing/end-lag: `FrameData` (ActionStates.cs:24); hitstun per move: the slash's `HitstunSecondsOverride`, Stab/Pulse consts.

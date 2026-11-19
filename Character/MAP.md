@@ -1,5 +1,5 @@
 # Character core map (PlayerCharacter, Movement, Sensing, Input)
-Verified against: 4e34142 (2026-11-14)
+Verified against: e5b75c6 (2026-11-19)
 Covers: Character/PlayerCharacter.cs, Character/SimFrames.cs, Character/Movement/*, Character/Sensing/*, Character/Input/*
 
 ## What this area is
@@ -15,6 +15,7 @@ The per-player frame update and everything it needs to decide how the body moves
 - `Movement/AirControl.cs`: `Apply` (air accel/cap/drag force along input) and `SoftClampVelocity`. `JumpServo.cs`: two-sided vy servo, used only by `LedgeJumpState`.
 - `Sensing/EnvironmentContext.cs` (457): per-frame bundle (inputs, registries, intents, `Modifiers`, `Body`) + lazily cached probes (below). `GroundChecker`, `CeilingChecker`, `WallChecker`, `StairChecker`, `ExposedUpperCornerChecker`, `ExposedLowerCornerChecker`: static tile probes returning soft contacts / corners.
 - `Input/Controller.cs`: `PlayerInput` struct, 32-frame input ring, `Poll` (hardware), `InjectInput`, `Capture`/`Restore`. `InputIntent.cs`: held/current direction. `InputParser.cs`: edge-triggered gesture detector. `IntentBuffer.cs`: `IntentType` enum + intent queue. `SmoothPen.cs`: critically-damped step helper (used by actions, projectiles, `World/ForceField.cs`; not by anything in this area).
+- Seed bar (plants): `PlayerCharacter.cs` `_seedBarActive`/`_selectedSeed` (:507-521), toggled by `input.F && !prev.F` and picked with Num1-5 at :751-758 (in the block-picker block, inside `Update`), snapshotted via `PlayerData.SeedBarActive`/`SelectedSeed` (:840, :1117, :1146) and exposed to actions through `EnvironmentContext.SeedBarActive`/`SelectedSeed`. `PlayerInput.F` therefore HAS a gameplay reader now (`Controller.cs` still says F is unbound in a comment: stale).
 
 ## Flow
 Entry: `Simulation.Step(input)` injects the input into the player's `Controller` (Simulation.cs:520), clears registries, publishes hurtboxes, then calls `_player.Update(_controller, ...)` (Simulation.cs:555); secondary players the same with their own controllers (563). Later in the Step: `CombatSystem.Apply` -> `PreStep` (610) -> physics. `Update` only writes `Body.AppliedForce`/velocity; physics runs after it.

@@ -1,6 +1,6 @@
 # Entities map
-Verified against: 069e3a3 (2026-11-14)
-Covers: Entities/*.cs, Entities/Projectiles/*.cs, Entities/Enemies/*.cs, Entities/Enemies/Types/*.cs, Entities/Enemies/Fighters/**/*.cs
+Verified against: e5b75c6 (2026-11-19)
+Covers: Entities/*.cs, Entities/Plants/*.cs, Entities/Projectiles/*.cs, Entities/Enemies/*.cs, Entities/Enemies/Types/*.cs, Entities/Enemies/Fighters/**/*.cs
 
 ## What this area is
 Every non-player sim object: the `Entity` base (body, health, hit-feel, snapshot hooks), `EntityKind` (snapshot identity), `EntityFactory` (spawn + rehydrate), projectiles/block entities, and the enemy framework (`EnemyEntity` host, movement/action FSM states, brains, blueprints) with the per-enemy types and the fighter (compiled-spec) system.
@@ -11,6 +11,11 @@ Entities/ (root)
 - `Entity.cs` base class (hurtbox, `OnHit`, `PreStep`, hitstop hold, `Rooted`, Capture/RestoreState, `WriteState`/`ReadState` hooks); `IEntitySpawner` (what `Update` may ask of the sim) at :265.
 - `EntityKind.cs` the enum (:11) + `EntityKinds.IsFighter` range check (:166). `EntityFactory.cs` balloon/ball/stalker/turret ctors, `CreateEnemy` (:61), `SubclassEnemy` table (:74), `Rehydrate` (:102).
 - `ChargedBlast.cs` fuse then crater for a broken charged tile. `MassBall.cs` coasting build-mass eruption payload. `PullPointEntity.cs` (479 lines) block-grab pulling point, owns peel group (only entity overriding `CaptureState`/`RestoreState`, :450/:457). `GrabThrowEntity.cs` released player-grab throw carrying a victim. `HoverTarget.cs` / `PracticeBall.cs` test/practice targets. `RayEmitter.cs` planted cone ray (Prism's). `EnemySpawner.cs` rooted nest that keeps N of a kind alive (plain `Entity`).
+Plants/ (the plants feature, `Plans/PLANT_SEEDS_PLAN.md`; overview section "Plants")
+- `PlantEntity.cs` abstract base (a `Rooted` `Entity` + `ITelegraphSource`): root check and burial in `Update`, growth, `Pose`, `SyncSprite` (rotates the figure onto the root face), shared burial/growth overlay. Its header comment is the subclass contract. `PlantTuning.cs`: `SeedKind` enum, `PlantPose`, `PlantData` (the rollback block in `EntityData.Plant`; field meanings per kind), `PlantRoot`, and every plant number (`PlantTuning`).
+- `PlantRules.cs` pure legality: `PlantSite`, `PlantRequest`, `PlantVerdict`, `PlantRules.Evaluate` (reach, root, occupancy, caps, cost, in that verdict order), dirt-root rule, rotation/up helpers. `SeedPlanting.cs` the one entry point `TryPlant` (+ `IsImplemented`, `CommitsOnRelease`, `RequestFrom`).
+- `SpitterPlant.cs`, `SnapperPlant.cs`, `SiegePodPlant.cs` the three entity kinds (each has `FromState` for `EntityFactory.Rehydrate`, EntityFactory.cs:143-149). `SiegeBlast.cs` the siege shot, stateless: blast disc + per-material-budget lance, `Faction.Hazard`; also the read-only `Preview` the telegraph and the bots use.
+- Thorns and block-eater are NOT here: they are tile state (`World/ThornPatches.cs`, `World/BlockEaterInfection.cs`).
 Projectiles/
 - `Projectile.cs` base (Age, Lifetime, sealed `Update` -> abstract `ProjectileUpdate`). `BulletProjectile`, `EnergyBallProjectile`, `StickyGrenadeProjectile`, `LobbedAreaProjectile` (507 lines; also the thrown clod), `RailBoltProjectile` (tile-breaking, Bastion), `FighterMine`.
 Enemies/ framework
@@ -90,6 +95,8 @@ Enemies/Fighters/ (spec -> priced blueprint pipeline; tool/test code except the 
     - `Telegraph` (all drawing) 514
   SpearmanEnemy.cs index (607): `Spear` 41, controller 164, Stab 228, Parry 393, body 505.
 
+Flow, plants: `SeedPlanting.TryPlant` (from `BlockPlaceAction`, Character/Action/ActionStates.cs:3299, or a bot) -> `PlantRules.Evaluate` -> `new XPlant(site, owner, faction, team)` -> `spawner.SpawnEntity`. Each frame `PlantEntity.Update`: dead if the root tile is not `Solid`; `Dormant` if its own cell is `Solid` (drain, `OnSuppressed`); else grow to `GrowSeconds`; else the kind's `Act`. Hits: the owner's faction passes through the hurtbox; a `Faction.Hazard` hit kills any plant (`PlantEntity.OnHit`).
+
 ## Flow
 1. Spawn: `Simulation.SpawnEntity` (Simulation.cs:462) assigns `Id`, adds `EntityRef`, `PhysicsBodyComponent`, `EntityData`, `BodyStateComp`. Stages call it from `Populate` (e.g. Stage.cs:1184, 1204) or `EnemyFactory.Create`; `EnemySpawner` uses `EntityFactory.CreateEnemy` (EnemySpawner.cs:111).
 2. Each `Simulation.Step`: every entity's `PublishHurtboxes` (Simulation.cs:553; `EnemyEntity` skips it while `IsIntangible`, EnemyEntity.cs:141) -> players update -> entity `Update` in spawn order over a pre-collected list (Simulation.cs:569; entities spawned during the loop first update next step) -> `CombatSystem.Apply` (:571) calls each hit target's `OnHit` -> force fields -> `Entity.PreStep` for every entity (:608) -> `StepSwept` -> dead sweep (:658).
@@ -120,6 +127,10 @@ Enemies/Fighters/ (spec -> priced blueprint pipeline; tool/test code except the 
 - `EntityKind.cs:107` says the fighter block must stay "LAST"; it is not (FighterMine..FrogMutant follow). Only contiguity matters (`IsFighter` range).
 - Stale `TemplateEnemy.cs` header: rules 4-5 (:80-87, "nowhere to snapshot brain state", "no randomness") predate `Scratch` and seeded `SenseMem.Rng`; the stock-pool list (:104-108) names states not in the pool (leap, shockwave, spin, pillar, block trail).
 - Entities see `IEntitySpawner` queries as read-only sampling; defaults return null/empty for stubs (Entity.cs:280-321), so headless tests may get null `Chunks`/`Hurtboxes`/`Targets`: guard them (FrogEnemy and Stormcaller do).
+- Plants: a plant's hurtbox is published from `PlantEntity.PublishHurtboxes` (skipped when `Spent`), but hit occlusion never counts the target's own cell, so a BURIED plant can still be hit through the block over it (plan "Decisions needed"; unfixed).
+- Plants: the siege pod fires the first awake frame after ripening, so it lives its whole life on `SeedlingHealth` (0.5): one poke kills it. A fired pod is `Spent`: no hurtbox, not counted by any cap, removed after `SiegePodFireLinger`. Burial freezes growth, so a buried pod never ripens.
+- Plants: the sprite is rotated by the base (`PlantRules.RotationOf(Root)`), so a figure is built UPRIGHT in the cell frame with the root face at y = `PlantFigureKit.RootY`, never for wall/ceiling cases.
+- Plants: `EntityKind.PlantThorns` / `PlantBlockEater` exist but nothing creates or rehydrates them (EntityFactory.cs:147,149 are commented out).
 
 ## Where to change X
 - Tune an attack's numbers: `ActionSpec.Default` (ActionSpec.cs:100) for pool actions; the constants atop the class for bespoke ones (e.g. `StormcallerPalmAction`).
@@ -131,6 +142,7 @@ Enemies/Fighters/ (spec -> priced blueprint pipeline; tool/test code except the 
 - New pool action kind: `ActionKind` + `ActionSpec.Default` row + action class under `Enemies/`; fighters also need `FighterCompiler`/`FighterCost` pricing.
 - New fighter: package file under `Fighters/Packages/` (`IFighterPackage`, no registration) or a spec in `FighterRoster.All`.
 - Boss HUD bar / label: override `BossTitle`/`BossShieldFraction`/`DisplayName` (EnemyEntity.cs:125-130).
+- **Add a plant**: subclass `PlantEntity` per its header (ctor, `Seed`, `GrowSeconds`, `Kind`, `Act`, `OnSuppressed`, `ActivePose`, `WritePlant`/`ReadPlant`, `FigureFor`, `FromState`), add the `SeedKind` + `EntityKind` + `EntityFactory.Rehydrate` line + a `TryPlant` case + `IsImplemented`, a cost in `PlantTuning`, a figure in `Drawing/Plants/`, and extend `SnapshotRoundTripTests`. Tuning: `PlantTuning.cs`.
 
 ## Tests
 Under `MTile.Tests/Sim/` (group `combat` unless noted; terms in `scripts/test-group.py`): `FrogEnemyTests`, `StormcallerEnemyTests`, `QuillbackEnemyTests`, `WarlordEnemyTests`, `ZeusHillTests`, `ZeusBlindFireTests`, `PrismEnemyTests`, `SpearmanEnemyTests`, `WardenEnemyTests`, `WizardEnemyTests`, `PulserEnemyTests`, `ShrikeTests`, `BirdTests`, `AspidEnemyTests`, `TemplateEnemyTests`, `GauntletEnemyTests`, `EnemySpawnerTests` (also covers `CreateEnemy`), all 20 `Fighter*Tests` (ActionSpec/ArenaRules/Arena/BlockAction/Combat/Competition/Cost/DashMine/Determinism/Forge/GauntletStage/GuardShove/LeagueSample/League/Package/Perception/Random/Rating/Record/RollbackKill). `ChargedBlastTests` is in `combat` and `terrain`.
@@ -138,3 +150,4 @@ Under `MTile.Tests/Sim/` (group `combat` unless noted; terms in `scripts/test-gr
 `terrain` group: `ChargedBlastTests`, `PullPointSnapshotTests` (also `simcore`), `Block*Tests`.
 Run `scripts/test-group.py combat` for most changes here; add `simcore` when touching `Entity`/`EntityFactory`/`EntityData` marshalling. Terms are substrings of the fully-qualified name.
 Stalker/Turret/Brute/Bullet have no dedicated class: Stalker+Turret ride in `SnapshotRoundTripTests` (:82-83) and `CoopModeTests`; Turret/Brute (and `CreateEnemy(Bullet)` throwing) in `EnemySpawnerTests`. A restore mid-cling is covered by `GauntletEnemyTests.Latcher_RestoredMidCling_GetsItsGravityBackWhenItLetsGo`.
+Plants (groups `combat`/`terrain`/`simcore` via the `Sim.Plant` / `Tests.Plant` terms): `PlantRulesTests`, `PlantLifecycleTests`, `PlantSeedBarTests`, `PlantSpitterTests`, `PlantSnapperTests`, `PlantSiegePodTests`, `PlantSiegeBlastTests`, `PlantThornTests`, `PlantBlockEaterTests` (in `MTile.Tests/` root), harness `PlantTestArena.cs`. `ZzzSnapperSheet` is a scratch harness.

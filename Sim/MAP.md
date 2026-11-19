@@ -1,5 +1,5 @@
 # Sim core map
-Verified against: 069e3a3 (2026-11-14)
+Verified against: e5b75c6 (2026-11-19)
 Covers: Simulation.cs, SimSnapshot.cs, Stage.cs, Sim/, Physics/
 
 ## What this area is
@@ -42,6 +42,7 @@ All of this is sim-side. Nothing here draws; the events at `Simulation.cs:303-32
 - `Physics/PhysicsContact.cs`: `PhysicsContact` → `SurfaceContact` → `SurfaceDistance` (solver, `Maintained`) / `FloatingSurfaceDistance` (state-owned); `PointForceContact`.
 - `Physics/Collision.cs`, `Polygon.cs`, `BoundingBox.cs`, `CollisionResult.cs`, `SweptResult.cs`: SAT overlap + swept SAT, convex polygons, float AABB with `Strip*`/`Inset*` probe builders.
 - `Physics/ContactEvent.cs`: per-impact record (`Stop`/`Bounce`/`BreakThrough`). `Physics/Bezier.cs`: scalar cubic only.
+- Plants touch this area in four places: `Stage.cs:202` calls `RegisterPlantShow()` (debug `plant_show*`), `Stage.cs:410` registers the `garden` stage (`Levels/garden.json`, `Versus`, spawns at x -300/+300; also in `LobbyStages.cs`), `EntityData.Plant` / `PlayerData.SeedBarActive,SelectedSeed` in `Sim/ECS/Components/EcsComponents.cs:235-281` (the snapshot slots), and `Simulation.Checksum` folds `ChunkMap.Thorns` and `ChunkMap.BlockEater` (Simulation.cs:777-791). Plant entities need no `Simulation` code: they are ordinary `SpawnEntity` entities via `IEntitySpawner`.
 
 ## Flow
 Match build (`Simulation(GameConfig, Stage)`, `Simulation.cs:383-444`; called from `Game1.cs:511` with `Stages.Get(...)` from `Game1.cs:301`):
