@@ -60,7 +60,7 @@ public class BotManeuverPlantTests(ITestOutputHelper output)
         var d = Make();
         bool sawSeedBar = false;
         int maxLive = 0;
-        for (int f = 0; f < 240; f++)
+        for (int f = 0; f < 300 + PlantTuning.SeedChannelFrames; f++)
         {
             d.Step();
             sawSeedBar |= d.P2.SeedBarActive;

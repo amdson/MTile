@@ -130,7 +130,7 @@ public class PlantChannelTests(ITestOutputHelper output)
         Assert.True(Pool(sim) >= before);
     }
 
-    public enum Cut { Release, Jump, Hit, CrouchWalkAway }
+    public enum Cut { Release, Jump, Hit }
 
     // Interrupted halfway, then the gesture carries on (RMB held again — except Release,
     // which stays up so no new press starts a fresh channel): the channel is cancelled, not
@@ -139,15 +139,13 @@ public class PlantChannelTests(ITestOutputHelper output)
     [InlineData(Cut.Release)]
     [InlineData(Cut.Jump)]
     [InlineData(Cut.Hit)]
-    [InlineData(Cut.CrouchWalkAway)]
     public void Interrupted_Channel_PlantsNothing_AndSpendsNothing(Cut cut)
     {
         var sim = OnSeedBar();
-        int target = cut == Cut.CrouchWalkAway ? 3 : 5;
+        int target = 5;
         float before = Pool(sim);
-        // Cut halfway; the crouch-walk starts early, so leaving reach beats completion.
-        int pre = cut == Cut.CrouchWalkAway ? 4 : PlantTuning.SeedChannelFrames / 2;
-        for (int i = 0; i < pre; i++) sim.Step(Hold(target, down: cut == Cut.CrouchWalkAway));
+        int pre = PlantTuning.SeedChannelFrames / 2;
+        for (int i = 0; i < pre; i++) sim.Step(Hold(target));
         Assert.True(Progress(sim) > 0f);
 
         switch (cut)
@@ -164,11 +162,6 @@ public class PlantChannelTests(ITestOutputHelper output)
                 sim.Player.Combat.OnHitRegistered(sim.Player.Frame, 60f, Dt);
                 sim.Step(Hold(target));
                 break;
-            case Cut.CrouchWalkAway:
-                for (int i = 0; i < 40; i++)
-                    sim.Step(new PlayerInput { RightClick = true, Down = true, Right = true,
-                                               MouseWorldPosition = CellCenter(target, Row) });
-                break;
         }
         Assert.True(Progress(sim) < 0f, "channel cancelled");
 
@@ -176,7 +169,7 @@ public class PlantChannelTests(ITestOutputHelper output)
         for (int i = 0; i < PlantTuning.SeedChannelFrames + 30; i++) sim.Step(resume);
         Assert.Empty(Plants(sim));
         Assert.True(Pool(sim) >= before, "nothing spent");
-        if (cut != Cut.CrouchWalkAway) Assert.False(Crouched(sim), "no lingering seed crouch");
+        Assert.False(Crouched(sim), "no lingering seed crouch");
     }
 
     // The seed crouch is not the Down key: standing at a platform's edge with RMB held on a

@@ -74,7 +74,7 @@ public class PlantRulesTests
         Assert.False(SeedPlanting.TryPlant(Request(p, 5, Row), null, sim.Chunks, sim));     // occupied
         Assert.False(SeedPlanting.TryPlant(Request(p, 25, Row), null, sim.Chunks, sim));    // ~20 tiles away
         var m = p.Abilities.Meters;
-        m.BuildMove = 1f; m.EruptMove = 0f;
+        m.BuildMove = 0f; m.EruptMove = 0f;
         Assert.Equal(PlantVerdict.CantAfford,
             PlantRules.Evaluate(Request(p, 3, Row), sim.Chunks, sim.Entities, m, out _));
         Assert.False(SeedPlanting.TryPlant(Request(p, 3, Row), m, sim.Chunks, sim));
@@ -82,24 +82,28 @@ public class PlantRulesTests
     }
 
     [Fact]
-    public void Cap_IsThreeLivePlantsPerPlayer_AndFreesOnDeath()
+    public void Cap_LivePlantsPerPlayer_Enforced_AndFreesOnDeath()
     {
         var sim = Make();
         Crouch(sim);
         var p = sim.Player;
-        Assert.True(SeedPlanting.TryPlant(Request(p, 3, Row), null, sim.Chunks, sim));
-        Assert.True(SeedPlanting.TryPlant(Request(p, 4, Row), null, sim.Chunks, sim));
-        Assert.True(SeedPlanting.TryPlant(Request(p, 5, Row), null, sim.Chunks, sim));
-        PutOver(p, 8);   // a fresh site in reach, so only the cap refuses it
+        int cap = PlantTuning.PlantCapPerPlayer;
+        for (int i = 0; i < cap; i++)
+        {
+            PutOver(p, 3 + i * 3);
+            Assert.True(SeedPlanting.TryPlant(Request(p, 3 + i * 3, Row), null, sim.Chunks, sim));
+        }
+        int fresh = 3 + cap * 3;
+        PutOver(p, fresh);   // a fresh site in reach, so only the cap refuses it
         Assert.Equal(PlantVerdict.CapReached,
-            PlantRules.Evaluate(Request(p, 8, Row), sim.Chunks, sim.Entities, null, out _));
-        Assert.False(SeedPlanting.TryPlant(Request(p, 8, Row), null, sim.Chunks, sim));
-        Assert.Equal(3, Plants(sim).Count);
+            PlantRules.Evaluate(Request(p, fresh, Row), sim.Chunks, sim.Entities, null, out _));
+        Assert.False(SeedPlanting.TryPlant(Request(p, fresh, Row), null, sim.Chunks, sim));
+        Assert.Equal(cap, Plants(sim).Count);
 
         Plants(sim)[0].Health = 0f;
         sim.Step(new PlayerInput { Down = true });
-        PutOver(p, 8);
-        Assert.True(SeedPlanting.TryPlant(Request(p, 8, Row), null, sim.Chunks, sim));
+        PutOver(p, fresh);
+        Assert.True(SeedPlanting.TryPlant(Request(p, fresh, Row), null, sim.Chunks, sim));
     }
 
     [Fact]

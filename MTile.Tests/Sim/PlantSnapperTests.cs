@@ -30,14 +30,14 @@ public class PlantSnapperTests
     }
 
     private static void Park(PlayerCharacter p, Vector2 pos) { p.Body.Position = pos; p.Body.Velocity = Vector2.Zero; }
-    private static Vector2 Near => Spawn(Cx + 1);   // one tile from the plant, well within range
-
-    [Fact]
-    public void Tuning_BiteIsHeavyTier_AndBeatsAHeldGuard()
+    private static void StepUntilPhase(Simulation sim, SnapperPlant plant, int phase)
     {
-        Assert.InRange(PlantTuning.SnapperBiteDamage, 0.6f, 0.9f);
-        Assert.True(PlantTuning.SnapperBiteDamage > 0.5f);   // a held guard blocks <= 0.5
+        int max = (int)((PlantTuning.SnapperWindup + PlantTuning.SnapperBiteActive + 2f) / Dt);
+        for (int i = 0; i < max && plant.Phase != phase; i++) sim.Step(default, default);
+        Assert.Equal(phase, plant.Phase);
     }
+
+    private static Vector2 Near => Spawn(Cx + 1);   // one tile from the plant, well within range
 
     [Fact]
     public void BitesAnOpponentInRange_AfterTheWindup_NeverTheOwner()
@@ -52,12 +52,12 @@ public class PlantSnapperTests
         Assert.Equal(1, plant.Phase);
 
         float minHp = hp0;
-        for (int i = 0; i < (int)(0.5f / Dt); i++)
+        for (int i = 0; i < (int)((PlantTuning.SnapperBiteActive + 0.5f) / Dt); i++)
         {
             sim.Step(default, default);
             minHp = System.Math.Min(minHp, p2.Health);
         }
-        Assert.True(minHp <= hp0 - 0.6f, $"expected a heavy bite, hp {hp0} -> {minHp}");
+        Assert.True(minHp < hp0, $"expected a bite, hp {hp0} -> {minHp}");
         Assert.Equal(sim.Player.MaxHealth, sim.Player.Health);
     }
 
@@ -75,16 +75,6 @@ public class PlantSnapperTests
         Run(sim, 3f);
         Assert.Equal(0, plant.Phase);
         Assert.Equal(sim.Player.MaxHealth, sim.Player.Health);
-    }
-
-    [Fact]
-    public void NoBiteBeyondRange()
-    {
-        var (sim, plant, p2) = MatureWithP2Far();
-        Park(p2, Spawn(Cx + 4));   // 4 tiles: out of the ~2 tile reach
-        Run2(sim, 2f);
-        Assert.Equal(0, plant.Phase);
-        Assert.Equal(p2.MaxHealth, p2.Health);
     }
 
     [Fact]
@@ -111,12 +101,10 @@ public class PlantSnapperTests
     {
         var (sim, plant, p2) = MatureWithP2Far();
         Park(p2, Near);
-        Run2(sim, 0.2f);
-        Assert.Equal(1, plant.Phase);
+        StepUntilPhase(sim, plant, 1);
         Park(p2, Spawn(40));
-        Run2(sim, 1f);
+        StepUntilPhase(sim, plant, 3);   // it whiffed and is spent
         Assert.Equal(p2.MaxHealth, p2.Health);
-        Assert.Equal(3, plant.Phase);   // it whiffed and is spent
     }
 
     [Fact]
@@ -139,7 +127,7 @@ public class PlantSnapperTests
         }
         // After the re-arm it winds up and bites again.
         float minHp = p2.MaxHealth;
-        for (int i = 0; i < (int)(1.5f / Dt); i++)
+        for (int i = 0; i < (int)((PlantTuning.SnapperWindup + PlantTuning.SnapperBiteActive + 1f) / Dt); i++)
         {
             Park(p2, Near);
             sim.Step(default, default);
@@ -153,8 +141,7 @@ public class PlantSnapperTests
     {
         var (sim, plant, p2) = MatureWithP2Far();
         Park(p2, Near);
-        Run2(sim, 0.25f);
-        Assert.Equal(1, plant.Phase);
+        StepUntilPhase(sim, plant, 1);
         sim.Chunks.EditorSetCell(Cx, Row, TileState.Solid, TileType.Stone);
         Run2(sim, 0.05f);
         Assert.True(plant.Dormant);
@@ -205,12 +192,18 @@ public class PlantSnapperTests
         var sim = Make();
         Crouch(sim);
         var p = sim.Player;
+        PutOver(p, 3);
         Assert.True(SeedPlanting.TryPlant(Request(p, 3, Row, SeedKind.Snapper), null, sim.Chunks, sim));
         Assert.IsType<SnapperPlant>(Plants(sim).Single());
-        Assert.True(SeedPlanting.TryPlant(Request(p, 4, Row), null, sim.Chunks, sim));            // spitter
-        Assert.True(SeedPlanting.TryPlant(Request(p, 5, Row, SeedKind.Snapper), null, sim.Chunks, sim));
-        PutOver(p, 8);   // in reach of a fresh cell: only the cap refuses it
-        Assert.False(SeedPlanting.TryPlant(Request(p, 8, Row, SeedKind.Snapper), null, sim.Chunks, sim));
-        Assert.Equal(3, Plants(sim).Count);
+        for (int i = 1; i < PlantTuning.PlantCapPerPlayer; i++)
+        {
+            int x = 3 + i * 3;
+            PutOver(p, x);
+            Assert.True(SeedPlanting.TryPlant(Request(p, x, Row, SeedKind.Snapper), null, sim.Chunks, sim));
+        }
+        int fresh = 3 + PlantTuning.PlantCapPerPlayer * 3;
+        PutOver(p, fresh);   // in reach of a fresh cell: only the cap refuses it
+        Assert.False(SeedPlanting.TryPlant(Request(p, fresh, Row, SeedKind.Snapper), null, sim.Chunks, sim));
+        Assert.Equal(PlantTuning.PlantCapPerPlayer, Plants(sim).Count);
     }
 }

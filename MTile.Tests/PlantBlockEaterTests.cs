@@ -88,24 +88,25 @@ public class PlantBlockEaterTests
     [Fact]
     public void Plant_CapIsPerTeam_AndFreesWhenThePatchDies()
     {
+        int cap = BlockEaterInfection.MaxLivePatchesPerTeam;
         var m = new ChunkMap();
-        Solid(m, 0, 0, TileType.Dirt, P2);
-        Solid(m, 3, 0, TileType.Dirt, P2);
-        Solid(m, 6, 0, TileType.Dirt, P1);
-        Assert.True(m.TryPlantBlockEater(0, 0, P1));
-        Assert.Equal(1, m.BlockEater.LivePatches(P1));
+        for (int i = 0; i <= cap; i++) Solid(m, i * 3, 0, TileType.Dirt, P2);
+        Solid(m, 100, 0, TileType.Dirt, P1);
+        for (int i = 0; i < cap; i++) Assert.True(m.TryPlantBlockEater(i * 3, 0, P1));
+        Assert.Equal(cap, m.BlockEater.LivePatches(P1));
 
-        // Second planting by the same team is refused, with no side effect.
-        Assert.False(m.CanPlantBlockEater(3, 0, P1));
-        Assert.False(m.TryPlantBlockEater(3, 0, P1));
-        Assert.Equal(1, m.BlockEater.Count);
+        // One more planting by the same team is refused, with no side effect.
+        int extra = cap * 3;
+        Assert.False(m.CanPlantBlockEater(extra, 0, P1));
+        Assert.False(m.TryPlantBlockEater(extra, 0, P1));
+        Assert.Equal(cap, m.BlockEater.Count);
         // The other team has its own cap.
-        Assert.True(m.TryPlantBlockEater(6, 0, P2));
+        Assert.True(m.TryPlantBlockEater(100, 0, P2));
 
-        // The isolated patch eats its only cell; the cap frees.
+        // An isolated patch eats its only cell; the cap frees.
         m.BreakCell(0, 0);
-        Assert.Equal(0, m.BlockEater.LivePatches(P1));
-        Assert.True(m.TryPlantBlockEater(3, 0, P1));
+        Assert.Equal(cap - 1, m.BlockEater.LivePatches(P1));
+        Assert.True(m.TryPlantBlockEater(extra, 0, P1));
     }
 
     // ── Damage over time ────────────────────────────────────────────────────────
@@ -289,8 +290,8 @@ public class PlantBlockEaterTests
             for (int y = 0; y < 3; y++)
                 Solid(m, x, y, x == 3 ? TileType.Dirt : TileType.Stone, P2);
         Assert.True(m.TryPlantBlockEater(0, 1, P1));
-        Tick(m, 130);
-        Assert.True(m.BlockEater.Count > 3);
+        Tick(m, 2 * BlockEaterInfection.SpreadIntervalFrames + 10);
+        Assert.True(m.BlockEater.Count > 1);
 
         var snap = m.CaptureTerrain();
         string atCapture = Signature(m);

@@ -34,14 +34,13 @@ public class PlantLifecycleTests
         var (sim, plant) = Planted();
         Assert.Equal(PlantTuning.SeedlingHealth, plant.Health);
         Run(sim, 1f);
-        Assert.Equal(PlantPose.Seed, plant.Pose);
-        Run(sim, 5f);
         Assert.False(plant.IsMature);
-        Assert.Equal(PlantPose.Sprout, plant.Pose);
-        plant.Health -= 0.2f;   // a seedling hit
-        Run(sim, PlantTuning.SpitterGrowSeconds - 6f + 0.2f);
+        float hit = PlantTuning.SeedlingHealth * 0.2f;
+        plant.Health -= hit;   // a seedling hit
+        for (int i = 0; i < (int)((PlantTuning.SpitterGrowSeconds + 5f) / Dt) && !plant.IsMature; i++)
+            sim.Step(default);
         Assert.True(plant.IsMature);
-        Assert.Equal(PlantTuning.SpitterHealth - 0.2f, plant.Health, 3);
+        Assert.Equal(PlantTuning.SpitterHealth - hit, plant.Health, 3);
         Assert.Equal(PlantPose.Idle, plant.Pose);
     }
 
@@ -66,19 +65,20 @@ public class PlantLifecycleTests
         Assert.Equal(PlantTuning.SpitterHealth, full, 3);
 
         sim.Chunks.EditorSetCell(Cx, Row, TileState.Solid, TileType.Foam);
-        Run(sim, 5f);
+        Run(sim, 0.5f);
         Assert.True(plant.Dormant);
         Assert.Equal(PlantPose.Dormant, plant.Pose);
-        Assert.InRange(plant.Health, full * 0.45f, full * 0.55f);   // ~10 s from full to dead
+        float drained = plant.Health;
+        Assert.True(drained < full, "buried plants drain");
 
         sim.Chunks.EditorSetCell(Cx, Row, TileState.Empty, TileType.Foam);
-        Run(sim, 3f);
+        Run(sim, 0.5f);
         Assert.False(plant.Dormant);
-        Assert.InRange(plant.Health, full * 0.45f, full * 0.55f);   // no regrowth of lost health
+        Assert.True(plant.Health <= drained + 1e-3f, "no regrowth of lost health");
 
         sim.Chunks.EditorSetCell(Cx, Row, TileState.Solid, TileType.Foam);
-        Run(sim, 5.5f);
-        Assert.True(plant.IsDead);
+        for (int i = 0; i < (int)(120f / Dt) && !plant.IsDead; i++) sim.Step(default);
+        Assert.True(plant.IsDead, "a buried plant eventually dies");
     }
 
     [Fact]

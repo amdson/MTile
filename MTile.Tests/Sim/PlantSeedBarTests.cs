@@ -123,11 +123,18 @@ public class PlantSeedBarTests
             Press(sim, new PlayerInput { Down = true });
             Crouch(sim, 4.5f);   // let the working pool refill between plants (cost scales with stone's)
         }
-        foreach (int x in new[] { 3, 4, 5 }) Channel(x);
+        for (int i = 0; i < PlantTuning.PlantCapPerPlayer; i++)
+        {
+            int x = 3 + i * 3;
+            PutOver(sim.Player, x);
+            Crouch(sim);
+            Channel(x);
+        }
         Assert.Equal(PlantTuning.PlantCapPerPlayer, Plants(sim).Count);
-        PutOver(sim.Player, 8);
+        int extra = 3 + PlantTuning.PlantCapPerPlayer * 3;
+        PutOver(sim.Player, extra);
         Crouch(sim);
-        Channel(8);
+        Channel(extra);
         Assert.Equal(PlantTuning.PlantCapPerPlayer, Plants(sim).Count);
     }
 
