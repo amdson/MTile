@@ -24,10 +24,8 @@ public static class SeedPlanting
         _                   => false,
     };
 
-    // Seeds planted on RELEASE rather than on press: the siege pod's press places, drag
-    // aims, release commits (§3). BlockPlaceAction reads this to decide when to call
-    // TryPlant; for these req.Aim is the press → release drag vector.
-    public static bool CommitsOnRelease(SeedKind seed) => seed == SeedKind.SiegePod;
+    // (CommitsOnRelease lived here while the siege pod committed on release; every seed is
+    // now a crouched channel that commits on completion — BlockPlaceAction seed mode.)
 
     // Plant req.Seed at (req.CellX, req.CellY). Returns true iff a plant was spawned and
     // paid for. `meters` is the owner's BuildMeters (null = free, for tests/stages);
@@ -54,8 +52,9 @@ public static class SeedPlanting
                 if (meters != null && !meters.TrySpendUnits(PlantTuning.CostFor(req.Seed))) return false;
                 return chunks.TryPlantThornPatch(req.CellX, req.CellY, (byte)req.Team);
             case SeedKind.SiegePod:
-                // Aim fixed here, from the press → release drag (a ~zero drag aims away
-                // from the root face). Evaluate already applied the one-alive rule.
+                // Aim fixed here, from the cell → cursor vector at channel completion (a
+                // cursor on the cell aims away from the root face). Evaluate already applied
+                // the one-alive rule.
                 plant = new SiegePodPlant(site, req.Owner, req.Faction, req.Team, req.Aim);
                 break;
             case SeedKind.BlockEater:
@@ -87,6 +86,7 @@ public static class SeedPlanting
             Faction  = ctx.Faction,
             Team     = ctx.Team,
             OwnerPos = ctx.Body.Position,
+            OwnerBounds = ctx.Body.Bounds,
             CellX    = cx,
             CellY    = cy,
             Aim      = aim,

@@ -50,6 +50,20 @@ internal static class PlantTestArena
         for (int i = 0; i < n; i++) s.Step(default, default);
     }
 
+    // Planting is crouched, close work (PlantRules.InReach): hold Down until the crouch has
+    // sunk (about 8 frames after CrouchedState enters), so the floor beside and beneath the
+    // body is in reach.
+    public static void Crouch(Simulation s, float seconds = 0.5f)
+    {
+        int n = (int)System.MathF.Round(seconds / Dt);
+        for (int i = 0; i < n; i++) s.Step(new PlayerInput { Down = true });
+    }
+
+    // Slide the body over column `col`, keeping its height (a crouched body stays crouched
+    // for a direct TryPlant/Evaluate call made before the next step).
+    public static void PutOver(PlayerCharacter p, int col)
+        => p.Body.Position = new Vector2((col + 0.5f) * Ts, p.Body.Position.Y);
+
     public static List<PlantEntity> Plants(Simulation s) => s.Entities.OfType<PlantEntity>().Where(p => !p.IsDead).ToList();
 
     public static SpitterPlant Spitter(Simulation s, int cx, int cy, PlayerCharacter owner)
@@ -59,6 +73,6 @@ internal static class PlantTestArena
         => new()
         {
             Seed = seed, Owner = owner.Id, Faction = owner.Faction, Team = owner.Team,
-            OwnerPos = owner.Body.Position, CellX = cx, CellY = cy,
+            OwnerPos = owner.Body.Position, OwnerBounds = owner.Body.Bounds, CellX = cx, CellY = cy,
         };
 }

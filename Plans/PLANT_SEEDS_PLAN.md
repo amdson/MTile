@@ -57,11 +57,21 @@ avoid is a **standoff**, which is what the two "breaker" plants and the burial r
   (`Character/PlayerCharacter.cs:489`, picker at `:731-735`, snapshot at `:1082`/`:1109`). On the
   seed bar `Num1..Num5` select a seed kind; the block selection is remembered across swaps.
 - **Planting reuses the place gesture** (Shift+RMB today, `BlockPlaceAction`). On the seed bar
-  plain RMB does the same single placement — a paint stroke of capped plants means nothing.
-  No new `ActionState` subclass, so no new clip is owed to `ClipBindingTests`.
-- **Siege pod aim:** press places, drag sets the direction, release commits.
-- **Cursor ghost** (render-only, declared through `Telegraph`): the plant's silhouette at the
-  target cell, tinted legal/illegal; for the siege pod, its aim line.
+  plain RMB does the same, as a **crouched channel** (revised 2026-11-19): press RMB while crouched
+  on a legal cell and hold for 1.5 s (`PlantTuning.SeedChannelFrames` = 90); the plant is made and
+  paid for only at completion, once per hold. Standing up, jumping, falling, dashing, a hit / stun /
+  grab, releasing, swapping bars, or the site turning illegal (incl. crouch-walking out of reach)
+  cancels it with nothing planted or spent. No new `ActionState` subclass, so no new clip is owed
+  to `ClipBindingTests`.
+- **Reach is close work:** the block the plant roots in (the block-eater: the target block) must
+  overlap the body's bounding box grown by `PlantTuning.PlantReachMargin` (one tile) left, right
+  and below — never above the head, never a ceiling root (`PlantRules.InReach`).
+- **Siege pod aim:** the direction from the pod's cell to the cursor, followed during the channel
+  and locked at completion (a cursor within `SiegePodMinDrag` of the cell: the default aim).
+- **Cursor ghost** (render-only): the plant's silhouette at the target cell, tinted legal/illegal
+  (red when not crouched or out of reach), drawn only when the cursor is near ground; for the
+  siege pod, its aim line. A live channel draws a filling progress ring at the site (the action's
+  `Telegraph`, seen by both players).
 - **HUD:** `Drawing/HudRenderer.cs:90` (`DrawBlockPickerHud`) draws whichever bar is active.
 
 Scaling past five seeds is a pre-match choice, not more keys: the stage defines its five native

@@ -7,7 +7,7 @@ using static MTile.Tests.Sim.PlantTestArena;
 namespace MTile.Tests.Sim;
 
 // The siege pod entity (Entities/Plants/SiegePodPlant.cs, Plans/PLANT_SEEDS_PLAN.md §4.4):
-// planted on release with the dragged aim, one alive per player, grows 20 s with its aim
+// planted by a crouched channel aimed cell → cursor, one alive per player, grows 20 s with its aim
 // telegraphed, fires ONCE by itself (SiegeBlast) and is gone; burial delays it, an early
 // kill removes it with no shot. The shot is not team-filtered and kills plants.
 // The firing unit itself is covered by PlantSiegeBlastTests; these pin the wrapper.
@@ -60,11 +60,14 @@ public class PlantSiegePodTests(ITestOutputHelper output)
 
     // ── Planting ──────────────────────────────────────────────────────────────
 
+    // A crouched channel on the press cell; the aim is cell centre → cursor, followed while
+    // channelling (the cursor sweeps elsewhere first) and locked at completion (moving the
+    // cursor after it changes nothing).
     [Theory]
-    [InlineData(40f, 0f, 1f, 0f)]       // dragged right: aimed right
+    [InlineData(40f, 0f, 1f, 0f)]       // cursor right of the cell: aimed right
     [InlineData(-30f, -30f, -0.7071f, -0.7071f)]
-    [InlineData(1f, 0f, 0f, -1f)]       // ~zero drag: straight away from the floor (up)
-    public void PlantsOnRelease_WithTheDraggedAim(float dx, float dy, float ax, float ay)
+    [InlineData(1f, 0f, 0f, -1f)]       // cursor on the cell: straight away from the floor (up)
+    public void PlantsOnChannelCompletion_AimedAtTheCursor(float dx, float dy, float ax, float ay)
     {
         var sim = Make();
         Run(sim, 0.5f);
@@ -72,26 +75,30 @@ public class PlantSiegePodTests(ITestOutputHelper output)
         sim.Step(default);
         sim.Step(new PlayerInput { Num4 = true });
         Assert.Equal(SeedKind.SiegePod, sim.Player.SelectedSeed);
-
-        var press = CellCenter(6, Row);
-        var drag  = new Vector2(dx, dy);
-        for (int i = 0; i <= 20; i++)
-        {
-            sim.Step(new PlayerInput { RightClick = true, MouseWorldPosition = press + drag * (i / 20f) });
-            Assert.Empty(Plants(sim));   // nothing until the release
-        }
+        Crouch(sim);
         // The pod's price is 16 stone, which under the CODE-default stone cost is more than the
         // working pool holds (MoveMax) — a test-config artefact (the shipped json halves it).
-        // Top the charge pool up so the release can pay whichever config is loaded.
+        // Top the charge pool up so the channel can afford it whichever config is loaded.
         var m = sim.Player.Abilities.Meters;
         m.EruptMove = BuildMeters.EruptMax;
         float before = m.BuildMove + m.EruptMove;
-        sim.Step(new PlayerInput { RightClick = false, MouseWorldPosition = press + drag });
-        sim.Step(new PlayerInput { RightClick = false, MouseWorldPosition = press + drag });
+
+        var cell = CellCenter(5, Row);
+        var aimAt = cell + new Vector2(dx, dy);
+        int n = PlantTuning.SeedChannelFrames;
+        for (int i = 0; i < n; i++)
+        {
+            var cursor = i < n / 2 ? cell + new Vector2(-50f, 20f) : aimAt;   // sweeps, then settles
+            if (i == 0) cursor = cell;                                          // pressed on the cell
+            sim.Step(new PlayerInput { RightClick = true, Down = true, MouseWorldPosition = cursor });
+            if (i < n - 1) Assert.Empty(Plants(sim));   // nothing until the channel completes
+        }
+        for (int i = 0; i < 10; i++)   // still held, cursor elsewhere: the aim stays locked
+            sim.Step(new PlayerInput { RightClick = true, Down = true, MouseWorldPosition = cell + new Vector2(0f, -60f) });
         Assert.True(m.BuildMove + m.EruptMove < before, "the pod was paid for");
 
         var pod = Assert.IsType<SiegePodPlant>(Assert.Single(Plants(sim)));
-        Assert.Equal(6, pod.CellX);
+        Assert.Equal(5, pod.CellX);
         Assert.Equal(Row, pod.CellY);
         Assert.Equal(ax, pod.Aim.X, 3);
         Assert.Equal(ay, pod.Aim.Y, 3);
@@ -108,7 +115,8 @@ public class PlantSiegePodTests(ITestOutputHelper output)
         PlantRequest At(PlayerCharacter p, int x, SeedKind k = SeedKind.SiegePod)
         {
             var r = Request(p, x, Row, k);
-            r.OwnerPos = CellCenter(x, Row - 1);
+            r.OwnerPos = CellCenter(x, Row - 1);   // a body standing just above the site
+            r.OwnerBounds = default;               // (the standing polygon at OwnerPos)
             return r;
         }
 

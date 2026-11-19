@@ -203,12 +203,13 @@ public class PlantSnapperTests
     public void Plantable_ThroughTryPlant_AndCountsTowardTheCap()
     {
         var sim = Make();
-        Run(sim, 0.5f);
+        Crouch(sim);
         var p = sim.Player;
-        Assert.True(SeedPlanting.TryPlant(Request(p, 2, Row, SeedKind.Snapper), null, sim.Chunks, sim));
+        Assert.True(SeedPlanting.TryPlant(Request(p, 3, Row, SeedKind.Snapper), null, sim.Chunks, sim));
         Assert.IsType<SnapperPlant>(Plants(sim).Single());
         Assert.True(SeedPlanting.TryPlant(Request(p, 4, Row), null, sim.Chunks, sim));            // spitter
-        Assert.True(SeedPlanting.TryPlant(Request(p, 6, Row, SeedKind.Snapper), null, sim.Chunks, sim));
+        Assert.True(SeedPlanting.TryPlant(Request(p, 5, Row, SeedKind.Snapper), null, sim.Chunks, sim));
+        PutOver(p, 8);   // in reach of a fresh cell: only the cap refuses it
         Assert.False(SeedPlanting.TryPlant(Request(p, 8, Row, SeedKind.Snapper), null, sim.Chunks, sim));
         Assert.Equal(3, Plants(sim).Count);
     }

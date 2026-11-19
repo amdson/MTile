@@ -50,34 +50,34 @@ public class PlantRulesTests
     public void TryPlant_OnDirt_SpawnsSpitter_AndPaysItsCost()
     {
         var sim = Make();
-        Run(sim, 0.5f);
+        Crouch(sim);
         var p = sim.Player;
         var m = p.Abilities.Meters;
         float before = m.BuildMove + m.EruptMove;
-        Assert.True(SeedPlanting.TryPlant(Request(p, 6, Row), m, sim.Chunks, sim));
+        Assert.True(SeedPlanting.TryPlant(Request(p, 5, Row), m, sim.Chunks, sim));
         var plant = Assert.Single(Plants(sim));
         Assert.IsType<SpitterPlant>(plant);
         Assert.Equal(p.Id, plant.Owner);
         Assert.Equal(p.Faction, plant.Faction);
         Assert.Equal(p.Team, plant.Team);
         Assert.Equal(before - PlantTuning.CostFor(SeedKind.Spitter), m.BuildMove + m.EruptMove, 3);
-        Assert.Equal(CellCenter(6, Row), plant.Body.Position);
+        Assert.Equal(CellCenter(5, Row), plant.Body.Position);
     }
 
     [Fact]
     public void TryPlant_Refuses_OccupiedCell_OutOfReach_AndUnaffordable()
     {
         var sim = Make();
-        Run(sim, 0.5f);
+        Crouch(sim);
         var p = sim.Player;
-        Assert.True(SeedPlanting.TryPlant(Request(p, 6, Row), null, sim.Chunks, sim));
-        Assert.False(SeedPlanting.TryPlant(Request(p, 6, Row), null, sim.Chunks, sim));     // occupied
+        Assert.True(SeedPlanting.TryPlant(Request(p, 5, Row), null, sim.Chunks, sim));
+        Assert.False(SeedPlanting.TryPlant(Request(p, 5, Row), null, sim.Chunks, sim));     // occupied
         Assert.False(SeedPlanting.TryPlant(Request(p, 25, Row), null, sim.Chunks, sim));    // ~20 tiles away
         var m = p.Abilities.Meters;
         m.BuildMove = 1f; m.EruptMove = 0f;
         Assert.Equal(PlantVerdict.CantAfford,
-            PlantRules.Evaluate(Request(p, 7, Row), sim.Chunks, sim.Entities, m, out _));
-        Assert.False(SeedPlanting.TryPlant(Request(p, 7, Row), m, sim.Chunks, sim));
+            PlantRules.Evaluate(Request(p, 3, Row), sim.Chunks, sim.Entities, m, out _));
+        Assert.False(SeedPlanting.TryPlant(Request(p, 3, Row), m, sim.Chunks, sim));
         Assert.Single(Plants(sim));
     }
 
@@ -85,18 +85,20 @@ public class PlantRulesTests
     public void Cap_IsThreeLivePlantsPerPlayer_AndFreesOnDeath()
     {
         var sim = Make();
-        Run(sim, 0.5f);
+        Crouch(sim);
         var p = sim.Player;
-        Assert.True(SeedPlanting.TryPlant(Request(p, 2, Row), null, sim.Chunks, sim));
+        Assert.True(SeedPlanting.TryPlant(Request(p, 3, Row), null, sim.Chunks, sim));
         Assert.True(SeedPlanting.TryPlant(Request(p, 4, Row), null, sim.Chunks, sim));
-        Assert.True(SeedPlanting.TryPlant(Request(p, 6, Row), null, sim.Chunks, sim));
+        Assert.True(SeedPlanting.TryPlant(Request(p, 5, Row), null, sim.Chunks, sim));
+        PutOver(p, 8);   // a fresh site in reach, so only the cap refuses it
         Assert.Equal(PlantVerdict.CapReached,
             PlantRules.Evaluate(Request(p, 8, Row), sim.Chunks, sim.Entities, null, out _));
         Assert.False(SeedPlanting.TryPlant(Request(p, 8, Row), null, sim.Chunks, sim));
         Assert.Equal(3, Plants(sim).Count);
 
         Plants(sim)[0].Health = 0f;
-        sim.Step(default);
+        sim.Step(new PlayerInput { Down = true });
+        PutOver(p, 8);
         Assert.True(SeedPlanting.TryPlant(Request(p, 8, Row), null, sim.Chunks, sim));
     }
 
@@ -119,22 +121,22 @@ public class PlantRulesTests
     public void Thorns_PlantThroughTheEntryPoint_AsATilePatch_NotAnEntity()
     {
         var sim = Make();
-        Run(sim, 0.5f);
+        Crouch(sim);
         var p = sim.Player;
         Assert.Equal(PlantVerdict.Ok,
-            PlantRules.Evaluate(Request(p, 6, Row, SeedKind.Thorns), sim.Chunks, sim.Entities, null, out _));
-        Assert.True(SeedPlanting.TryPlant(Request(p, 6, Row, SeedKind.Thorns), null, sim.Chunks, sim));
-        Assert.True(sim.Chunks.Thorns.IsSeedCell(6, Row));
+            PlantRules.Evaluate(Request(p, 5, Row, SeedKind.Thorns), sim.Chunks, sim.Entities, null, out _));
+        Assert.True(SeedPlanting.TryPlant(Request(p, 5, Row, SeedKind.Thorns), null, sim.Chunks, sim));
+        Assert.True(sim.Chunks.Thorns.IsSeedCell(5, Row));
         Assert.Empty(Plants(sim));
         // The same cell cannot take a second patch.
-        Assert.False(SeedPlanting.TryPlant(Request(p, 6, Row, SeedKind.Thorns), null, sim.Chunks, sim));
+        Assert.False(SeedPlanting.TryPlant(Request(p, 5, Row, SeedKind.Thorns), null, sim.Chunks, sim));
     }
 
     [Fact]
     public void BlockEater_PlantsOnAnEnemyOwnedBlock_NotOnOwnOrUnownedOnes()
     {
         var sim = Make();
-        Run(sim, 0.5f);
+        Crouch(sim);
         var p = sim.Player;
         byte mine = BlockOwnership.OwnerFor(p.Faction);
         byte theirs = mine == BlockOwnership.Player1 ? BlockOwnership.Player2 : BlockOwnership.Player1;
@@ -142,6 +144,7 @@ public class PlantRulesTests
         // Floor cells: 6 unowned, 7 owned by me, 8 owned by the other player.
         sim.Chunks.Ownership.Stamp(7, FloorRow, mine, now);
         sim.Chunks.Ownership.Stamp(8, FloorRow, theirs, now);
+        PutOver(p, 7);   // all three are beneath / beside the body
 
         Assert.False(SeedPlanting.TryPlant(Request(p, 6, FloorRow, SeedKind.BlockEater), null, sim.Chunks, sim));
         Assert.False(SeedPlanting.TryPlant(Request(p, 7, FloorRow, SeedKind.BlockEater), null, sim.Chunks, sim));
@@ -152,17 +155,48 @@ public class PlantRulesTests
         Assert.Empty(Plants(sim));
     }
 
+    // Close reach (PlantRules.InReach, PlantTuning.PlantReachMargin): the ROOT must be beside
+    // or beneath the crouched body — two tiles off, above the head, or a ceiling is refused.
+    [Fact]
+    public void Reach_BesideAndBeneath_Accepted_TwoTilesOff_AboveTheHead_AndCeilings_Refused()
+    {
+        var sim = Make();
+        Crouch(sim);
+        var p = sim.Player;
+        PutOver(p, 4);
+        Assert.IsType<CrouchedState>(p.CurrentState);
+        PlantVerdict V(int x, int y, out PlantSite site)
+            => PlantRules.Evaluate(Request(p, x, y), sim.Chunks, sim.Entities, null, out site);
+
+        Assert.Equal(PlantVerdict.Ok, V(4, Row, out var s));            // beneath the body
+        Assert.Equal(PlantRoot.Below, s.Root);
+        Assert.Equal(PlantVerdict.Ok, V(3, Row, out _));                // beside, on the floor
+        Assert.Equal(PlantVerdict.Ok, V(5, Row, out _));
+        Assert.Equal(PlantVerdict.OutOfReach, V(6, Row, out _));        // two tiles off
+        Assert.Equal(PlantVerdict.OutOfReach, V(2, Row, out _));
+        Assert.Equal(PlantVerdict.OutOfReach, V(10, Row, out _));
+
+        var c = sim.Chunks;
+        c.EditorSetCell(5, Row - 1, TileState.Solid, TileType.Dirt);    // a wall beside the body
+        Assert.Equal(PlantVerdict.Ok, V(4, Row - 1, out s));
+        Assert.Equal(PlantRoot.Right, s.Root);
+        c.EditorSetCell(5, Row - 2, TileState.Solid, TileType.Dirt);    // the same wall above the head
+        Assert.Equal(PlantVerdict.OutOfReach, V(6, Row - 2, out _));
+        c.EditorSetCell(4, Row - 3, TileState.Solid, TileType.Dirt);    // a ceiling over the head
+        Assert.Equal(PlantVerdict.OutOfReach, V(4, Row - 2, out _));
+    }
+
     [Fact]
     public void Blocks_CanBePlacedOverAPlant()
     {
         var sim = Make();
-        Run(sim, 0.5f);
-        Assert.True(SeedPlanting.TryPlant(Request(sim.Player, 6, Row), null, sim.Chunks, sim));
+        Crouch(sim);
+        Assert.True(SeedPlanting.TryPlant(Request(sim.Player, 5, Row), null, sim.Chunks, sim));
         var plant = Plants(sim).Single();
         var pos = plant.Body.Position;
-        Assert.NotNull(sim.Chunks.TryRequestTile(6, Row, TileType.Dirt));
+        Assert.NotNull(sim.Chunks.TryRequestTile(5, Row, TileType.Dirt));
         Run(sim, 2f);
-        Assert.Equal(TileState.Solid, sim.Chunks.GetCellState(6, Row));
+        Assert.Equal(TileState.Solid, sim.Chunks.GetCellState(5, Row));
         Assert.False(plant.IsDead);
         Assert.True(plant.Dormant);
         Assert.Equal(pos, plant.Body.Position);   // rooted: the block did not shove it out

@@ -85,11 +85,14 @@ public struct ActionVars
     public bool    SpikeMode;
     // BlockPlaceAction seed mode (Plans/PLANT_SEEDS_PLAN.md §3): the hold started on the
     // seed bar, so it plants instead of placing blocks. Latched at the press; swapping bars
-    // ends the hold. SeedArmed: this hold began on an RMB press edge and still owes its
-    // one planting (a release-commit seed plants on release, at OriginCell, aimed by the
-    // drag from BallPos — the press point).
+    // ends the hold. SeedArmed: the planting CHANNEL is live — this hold began on an RMB
+    // press edge while crouched, on a legal site, and has neither completed nor been
+    // cancelled. Its target is OriginCell (cell indices, latched at the press);
+    // SeedChannelFrames counts the frames channelled so far (plants at
+    // PlantTuning.SeedChannelFrames). One planting per hold.
     public bool    SeedMode;
     public bool    SeedArmed;
+    public int     SeedChannelFrames;
 
     public Vector2 GrabDir;           // GrabAction — hold focus / throw direction
     public Vector2 GuardDir;          // Guard — unit aim (body → cursor), tracked every frame;
