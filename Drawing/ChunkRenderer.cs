@@ -62,6 +62,7 @@ public sealed class ChunkRenderer
         DrawOwnership(chunks);
         DrawSpikes(chunks);
         DrawSpikeSeeds(chunks);
+        DrawThorns(chunks);   // ── Thorns ── (Drawing/ThornRenderer.cs)
         DrawCrystalWave(chunks);
 
         foreach (var (r, color) in sim.Platforms)
@@ -272,6 +273,7 @@ public sealed class ChunkRenderer
                 if (t.State != TileState.Spike) continue;
                 int gtx = chunk.ChunkPos.X * Chunk.Size + tx, gty = chunk.ChunkPos.Y * Chunk.Size + ty;
                 if (chunks.SpikeSeeds.Has(gtx, gty)) continue;
+                if (chunks.Thorns.IsThornCell(gtx, gty)) continue;   // ── Thorns ── drawn as brambles
                 var color = TilePalette.SpikeColor(t.Team);
                 float left = gtx * Chunk.TileSize, top = gty * Chunk.TileSize;
                 const float T = Chunk.TileSize;
@@ -305,6 +307,7 @@ public sealed class ChunkRenderer
         {
             var (gtx, gty) = cell;
             if (chunks.GetCellState(gtx, gty) != TileState.Spike) continue;
+            if (chunks.Thorns.IsThornCell(gtx, gty)) continue;   // ── Thorns ── own telegraph
             float left = gtx * Chunk.TileSize, top = gty * Chunk.TileSize;
             if (MathF.Abs(left - _camera.Position.X) > halfW || MathF.Abs(top - _camera.Position.Y) > halfH)
                 continue;
@@ -335,6 +338,15 @@ public sealed class ChunkRenderer
             }
             Shard(sx * Chunk.TileSize, sy * Chunk.TileSize, nx, ny, height, SeedHalfWidth, color);
         }
+    }
+
+    // ── Thorns ── thorn-patch spikes as code-drawn brambles (Drawing/ThornRenderer.cs).
+    private readonly ThornRenderer _thorns = new();
+    private void DrawThorns(ChunkMap chunks)
+    {
+        var vp = _graphicsDevice.Viewport;
+        _thorns.Draw(_spriteBatch, _pixel, chunks, _camera.Position,
+                     vp.Width / (2f * _camera.Zoom) + Chunk.TileSize, vp.Height / (2f * _camera.Zoom) + Chunk.TileSize);
     }
 
     // ---- Crystal wave (todo.txt #7) — render-only view of ChunkMap.Crystals -----------

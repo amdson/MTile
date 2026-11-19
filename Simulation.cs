@@ -766,6 +766,15 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         foreach (var d in _chunks.Ownership.Entries)
             t ^= CellF(d.Key.gtx, d.Key.gty, 0f,
                        0x08 ^ ((ulong)d.Value.Owner << 8) ^ ((ulong)(uint)d.Value.PlacedFrame << 16));
+        // ── Thorns ── patch membership per cell (salt 0x31) and each patch's record
+        // (salt 0x32: team, seed, clocks, spreading flag). Value slot unused.
+        foreach (var d in _chunks.Thorns.CellEntries)
+            t ^= CellF(d.Key.gtx, d.Key.gty, 0f, 0x31 ^ ((ulong)(uint)d.Value << 16));
+        foreach (var p in _chunks.Thorns.Patches)
+            t ^= CellF(p.SeedGtx, p.SeedGty, 0f,
+                       0x32 ^ ((ulong)p.Team << 8) ^ ((ulong)(uint)p.Id << 16)
+                            ^ ((ulong)(uint)p.NextGrowFrame * 0x9E3779B1UL)
+                            ^ ((ulong)(uint)p.PlantedFrame << 40) ^ ((p.Spreading ? 1UL : 0UL) << 63));
 
         Mix((uint)t); Mix((uint)(t >> 32));
         return h;

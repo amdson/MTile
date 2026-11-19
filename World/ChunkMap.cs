@@ -63,6 +63,24 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // every path that empties a cell. Sim state (the block grab reads it), snapshotted.
     public readonly BlockOwnership Ownership = new();
 
+    // ── Thorns ──────────────────────────────────────────────────────────────────
+    // Thorn patches (Plans/PLANT_SEEDS_PLAN.md §4.3): which spike tiles were grown by a
+    // planted patch, and the patches themselves. Drives spreading (TickSprouts) and
+    // block reinforcement (DamageCell). Snapshotted; cleaned by WriteTile.
+    public readonly ThornPatches Thorns = new();
+
+    // The planting hook's entry point: plant a thorn patch whose seed spike sits in the
+    // open cell (gtx, gty) against a Dirt face. False, with no side effect, when illegal
+    // (cell not empty, no dirt face, team at its patch or cell cap). Charging the build
+    // meter (ThornPatches.BuildCost) is the caller's job, as for every other build.
+    public bool TryPlantThornPatch(int gtx, int gty, byte team)
+        => Thorns.TryPlant(this, gtx, gty, team, TerrainFrame);
+
+    // Pure legality query for the cursor ghost: would TryPlantThornPatch succeed?
+    public bool CanPlantThornPatch(int gtx, int gty, byte team)
+        => Thorns.CanPlant(this, gtx, gty, team);
+    // ── end Thorns ──────────────────────────────────────────────────────────────
+
     // Register/refresh a wave's identity from its ball. Called on every deposit;
     // direction locks on the first nonzero-velocity touch (the ball never turns).
     public void TouchWave(EntityId wave, Vector2 velocity)
@@ -118,7 +136,11 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             Crystals.Remove(chunk.ChunkPos.X * Chunk.Size + tx, chunk.ChunkPos.Y * Chunk.Size + ty);
         // Anything replacing a spike tile takes its arming seed with it.
         if (t.State == TileState.Spike && state != TileState.Spike)
+        {
             SpikeSeeds.Clear(chunk.ChunkPos.X * Chunk.Size + tx, chunk.ChunkPos.Y * Chunk.Size + ty);
+            // ── Thorns ── a cleared thorn cell leaves its patch (a lost seed stops it).
+            Thorns.OnSpikeCleared(chunk.ChunkPos.X * Chunk.Size + tx, chunk.ChunkPos.Y * Chunk.Size + ty);
+        }
         _journal.RecordTileWrite(chunk.ChunkPos, tx, ty, t.State, t.Type, t.Team);
         TerrainHash ^= CellHash(chunk.ChunkPos, tx, ty, t.State, t.Type, t.Team);   // out with the old
         t.State  = state;
@@ -632,6 +654,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // Spike seeds that finished seed+flash expire this frame, arming their spike tile
         // (before SpikeContactSystem runs later in the step, so a grown spike bites at once).
         SpikeSeeds.Tick(TerrainFrame);
+        // ── Thorns ── each due patch requests one more spike (after the seed tick, so a
+        // new thorn starts its own arming telegraph this frame).
+        Thorns.Tick(this, TerrainFrame);
         // Crystal wave front: pending crystals beside a grown one seed this frame.
         Crystals.Tick(this, TerrainFrame);
 
@@ -834,6 +859,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // Lookup the cell's material type so TileDamage can compare accumulated damage
         // against the per-type max HP (Sand ≈ 0.5, Dirt ≈ 1.0, Stone ≈ 2.0).
         var type = GetCellType(gtx, gty);
+        // ── Thorns ── a block with a thorn-patch spike on any face is reinforced. Every
+        // tile damage source lands here, so none is exempt; hand-placed spikes aren't in
+        // the patch table and don't reinforce.
+        if (Thorns.Reinforces(gtx, gty)) amount *= ThornPatches.ReinforceDamageScale;
         if (!Damage.ApplyDamage(gtx, gty, amount, type)) return false;
         return BreakCell(gtx, gty);
     }
@@ -961,6 +990,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Waves       = Waves.Capture(),
         WaveCells   = Waves.CaptureCells(),
         Ownership   = Ownership.Capture(),
+        Thorns      = Thorns.Capture(),   // ── Thorns ──
         SproutClock = SproutClock,
         TerrainFrame = TerrainFrame,
     };
@@ -982,6 +1012,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Mass.Restore(s.Mass);
         Waves.Restore(s.Waves, s.WaveCells);
         Ownership.Restore(s.Ownership);
+        Thorns.Restore(s.Thorns);   // ── Thorns ──
         SproutClock = s.SproutClock;
         TerrainFrame = s.TerrainFrame;
 
