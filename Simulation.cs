@@ -766,6 +766,14 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         foreach (var d in _chunks.Ownership.Entries)
             t ^= CellF(d.Key.gtx, d.Key.gty, 0f,
                        0x08 ^ ((ulong)d.Value.Owner << 8) ^ ((ulong)(uint)d.Value.PlacedFrame << 16));
+        // ── Block-eater ── team, origin side and infected frame ride the salt; the patch
+        // identity (heart cell + plant frame) rides the value slot as a mixed int.
+        foreach (var d in _chunks.BlockEater.Entries)
+        {
+            var c = d.Value;
+            t ^= CellF(d.Key.gtx, d.Key.gty, (float)(c.HeartGtx * 73856093 ^ c.HeartGty * 19349663 ^ c.PlantFrame),
+                       0x1E ^ ((ulong)c.Team << 8) ^ ((ulong)c.From << 12) ^ ((ulong)(uint)c.InfectedFrame << 16));
+        }
 
         Mix((uint)t); Mix((uint)(t >> 32));
         return h;

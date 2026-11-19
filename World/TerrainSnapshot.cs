@@ -28,6 +28,8 @@ public sealed class TerrainSnapshot
     public Dictionary<EntityId, AvalancheWaves.WaveInfo>            Waves;
     public Dictionary<(int gtx, int gty), EntityId>                 WaveCells;
     public Dictionary<(int gtx, int gty), BlockOwnership.Claim>     Ownership;
+    // ── Block-eater ──
+    public Dictionary<(int gtx, int gty), BlockEaterInfection.Cell> BlockEater;
     public float SproutClock;
     public int   TerrainFrame;
 }

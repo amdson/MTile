@@ -16,7 +16,7 @@ The sim-side tile world and the hit/hurt registries. `ChunkMap` owns the dense t
   - 823-944 `DamageCell`, `BreakCell`, `EditorSetCell`, `HarvestCell`
   - 950-1011 `CaptureTerrain`/`RestoreTerrain`/`RevertTile`; 1018-1078 `CaptureDense`/`RestoreDense`
 - `TerrainJournal.cs`: inverse-delta log (TileWrite, ChunkCreated). `TerrainSnapshot.cs`: `TerrainSnapshot`, `SproutGraphData`, `SproutNodeData`. `DenseTerrainCapture.cs`: full-grid copy for the recorder.
-- Sparse tables (each has Capture/Restore): `TileDamage.cs` (HP), `TileCharge.cs`, `FoamDecay.cs`, `TileSpikeSeeds.cs`, `TileImpactAccumulator.cs`, `TileMassField.cs`, `AvalancheWaves.cs`, `BlockOwnership.cs`, `CrystalWaveField.cs` (+ `CrystalWave.cs` dials, `CrystalLifecycle.cs` phase math).
+- Sparse tables (each has Capture/Restore): `TileDamage.cs` (HP), `TileCharge.cs`, `FoamDecay.cs`, `TileSpikeSeeds.cs`, `TileImpactAccumulator.cs`, `TileMassField.cs`, `AvalancheWaves.cs`, `BlockOwnership.cs`, `BlockEaterInfection.cs` (block-eater plant: infection table, ticked in `TickSprouts`, chews via `DamageCell`; art in `Drawing/BlockEaterRenderer.cs`), `CrystalWaveField.cs` (+ `CrystalWave.cs` dials, `CrystalLifecycle.cs` phase math).
 - Sprouts: `TileSproutGraph.cs` (Pending/Growing lists, dedupe by cell), `TileSproutNode.cs` (faces, volume geometry, `FaceOrder`).
 - `MaterialStrengths.cs`: per-type MaxHP, Restitution, BuildCost, loaded from `configs/material_strengths.json`.
 - Queries: `TileQuery.cs`, `TileQueryChain.cs`, `TileFilters.cs` (solid-only fluent queries for probes), `WorldQuery.cs` (tiles + providers), `SolidShapeProvider.cs` (`SolidShapeRef`, `ISolidShapeProvider`), `MovingRectangle.cs` (platform provider), `TileReach.cs` (terrain line-of-sight and area damage).
