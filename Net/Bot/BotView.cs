@@ -59,6 +59,30 @@ public sealed class BotView
     // The target couldn't act (hitstun / stun / grabbed) as of the perceived frame.
     public bool TargetHelpless;
 
+    // ── Plants (Plans/PLANT_SEEDS_PLAN.md §8b) ──────────────────────────────────
+    // Live plants owned by someone else, on another faction (the ones our swings can
+    // hurt — a plant's hurtbox carries its owner's faction). Plants are rooted and in plain
+    // sight, so they are read live, not through the ReactionFrames ring. Refreshed lazily
+    // once per Poll frame, so every brain that fills Frame gets it. Thorn patches are tile
+    // state, not entities, and are not listed.
+    private readonly System.Collections.Generic.List<PlantEntity> _opposingPlants = new();
+    private int _plantsFrame = int.MinValue;
+
+    public System.Collections.Generic.IReadOnlyList<PlantEntity> OpposingPlants
+    {
+        get
+        {
+            if (_plantsFrame == Frame) return _opposingPlants;
+            _plantsFrame = Frame;
+            _opposingPlants.Clear();
+            if (Sim == null || Self == null) return _opposingPlants;
+            foreach (var e in Sim.Entities)
+                if (e is PlantEntity p && !p.IsDead && p.Owner != Self.Id && p.Faction != Self.Faction)
+                    _opposingPlants.Add(p);
+            return _opposingPlants;
+        }
+    }
+
     // ── Terrain probes ──────────────────────────────────────────────────────────
 
     public static Point Cell(Vector2 world) => new(
