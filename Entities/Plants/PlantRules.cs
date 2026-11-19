@@ -127,14 +127,13 @@ public static class PlantRules
     {
         if (entities == null) return false;
         foreach (var e in entities)
-            if (e is PlantEntity p && !p.IsDead && p.CellX == cx && p.CellY == cy) return true;
+            if (e is PlantEntity p && !p.IsDead && !p.Spent && p.CellX == cx && p.CellY == cy) return true;
         return false;
     }
 
     // ── Caps ────────────────────────────────────────────────────────────────
     // Which shared cap a seed counts against. Thorns are capped separately (§4.3); the
-    // siege pod additionally allows one alive per player (its parcel adds that check in
-    // its TryPlant case or here).
+    // siege pod additionally allows one alive per player (checked in Evaluate below).
     public enum CapGroup { Plants, Thorns }
 
     public static CapGroup GroupOf(SeedKind seed) => seed == SeedKind.Thorns ? CapGroup.Thorns : CapGroup.Plants;
@@ -152,7 +151,7 @@ public static class PlantRules
         int n = 0;
         if (entities == null) return 0;
         foreach (var e in entities)
-            if (e is PlantEntity p && !p.IsDead && p.Owner == owner && GroupOf(p.Seed) == group) n++;
+            if (e is PlantEntity p && !p.IsDead && !p.Spent && p.Owner == owner && GroupOf(p.Seed) == group) n++;
         return n;
     }
 
@@ -161,7 +160,7 @@ public static class PlantRules
         int n = 0;
         if (entities == null) return 0;
         foreach (var e in entities)
-            if (e is PlantEntity p && !p.IsDead && p.Owner == owner && p.Seed == seed) n++;
+            if (e is PlantEntity p && !p.IsDead && !p.Spent && p.Owner == owner && p.Seed == seed) n++;
         return n;
     }
 
@@ -191,6 +190,11 @@ public static class PlantRules
             return PlantVerdict.CapReached;
         var g = GroupOf(req.Seed);
         if (LiveCount(entities, req.Owner, g) >= CapFor(g))   return PlantVerdict.CapReached;
+        // The siege pod: additionally one alive per player (§4.4). A pod that has fired is
+        // Spent, so it frees the slot the moment it fires.
+        if (req.Seed == SeedKind.SiegePod
+            && LiveCount(entities, req.Owner, SeedKind.SiegePod) >= PlantTuning.SiegePodPerPlayer)
+            return PlantVerdict.CapReached;
         if (meters != null && meters.BuildMove + meters.EruptMove < PlantTuning.CostFor(req.Seed))
             return PlantVerdict.CantAfford;
         return PlantVerdict.Ok;

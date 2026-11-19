@@ -145,7 +145,7 @@ public static class EntityFactory
             EntityKind.PlantSpitter    => SpitterPlant.FromState(in d, body.Position),
             EntityKind.PlantSnapper    => SnapperPlant.FromState(in d, body.Position),
             // EntityKind.PlantThorns     => ThornsPlant.FromState(in d, body.Position),     // milestone M4
-            // EntityKind.PlantSiegePod   => SiegePodPlant.FromState(in d, body.Position),   // milestone M3
+            EntityKind.PlantSiegePod   => SiegePodPlant.FromState(in d, body.Position),
             // EntityKind.PlantBlockEater => BlockEaterPlant.FromState(in d, body.Position), // milestone M6
             _ when EnemyFactory.IsRegistered(d.Kind) => EnemyFactory.Create(d.Kind, body.Position),
             // A fighter kind that is NOT registered (an arena slot the caller never

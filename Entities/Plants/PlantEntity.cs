@@ -103,6 +103,27 @@ public abstract class PlantEntity : Entity, ITelegraphSource
     protected abstract void Act(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner);
     protected virtual void OnSuppressed() { }
 
+    // A plant that has done its one act and lingers only to be drawn (the fired siege pod):
+    // no hurtbox, unhittable, never counts toward a cap and does not hold its cell.
+    public virtual bool Spent => false;
+
+    public override void PublishHurtboxes(HurtboxWorld world)
+    {
+        if (!Spent) base.PublishHurtboxes(world);
+    }
+
+    // The siege shot (Faction.Hazard, SiegeBlast — the only Hazard source) "kills plants it
+    // touches" (§4.4): any plant it lands on dies outright, whoever owns it. A dead or Spent
+    // plant ignores hits, so a firing pod — whose hurtbox was published before it fired this
+    // frame — is not handled twice by its own shot.
+    public override Vector2 OnHit(in Hitbox hit, in Hurtbox hb)
+    {
+        if (IsDead || Spent) return Vector2.Zero;
+        var delivered = base.OnHit(in hit, in hb);
+        if (hit.Owner == Faction.Hazard) Health = 0f;
+        return delivered;
+    }
+
     // ── Pose (render reads it) ──────────────────────────────────────────────
     protected virtual PlantPose ActivePose => PlantPose.Idle;
 
@@ -164,7 +185,7 @@ public abstract class PlantEntity : Entity, ITelegraphSource
 
     // Shared overlay: a growth arc while growing, and for a buried plant an outline of
     // its cell plus a health tick, so it stays readable through the covering block (§5).
-    // Subclasses add their tells in TelegraphKind.
+    // Subclasses add their tells in TelegraphKind (called while dormant too).
     public void Telegraph(TelegraphList t)
     {
         if (IsDead) return;
@@ -180,6 +201,7 @@ public abstract class PlantEntity : Entity, ITelegraphSource
             t.Line(c + new Vector2(-h, h),  c + new Vector2(-h, -h), col, 1f);
             float f = MathHelper.Clamp(Health / MaxHealth, 0f, 1f);
             t.Line(c + new Vector2(-h, h + 2f), c + new Vector2(-h + 2f * h * f, h + 2f), PlantPalette.Wilt, 1.5f);
+            TelegraphKind(t);   // kinds whose threat outlives burial (the siege pod's aim) still show it
             return;
         }
         if (!IsMature)

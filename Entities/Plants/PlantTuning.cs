@@ -27,7 +27,9 @@ public struct PlantData
     public float    Timer;      // Spitter: cooldown left before the next wind-up may start
     public float    Clock;      // Spitter: seconds into the current wind-up
     public int      Phase;      // Spitter: 0 = ready/cooling, 1 = winding up
-    public Vector2  Aim;        // Spitter: where the wind-up is aimed (world px) — the telegraph
+    public Vector2  Aim;        // Spitter: where the wind-up is aimed (world px) — the telegraph.
+                                // Siege pod: the locked unit aim direction (Phase 0 growing, 1 fired;
+                                // Clock = seconds since firing; Timer = the fired lance's reach, px)
     public int      HitId;      // free for kinds that publish their own hitboxes
     public int      Count;      // free (e.g. a patch size)
 }
@@ -104,4 +106,13 @@ public static class PlantTuning
     public const float SnapperHitstun        = 0.35f;
     public const float SnapperLaunchDecay    = 350f;              // as GroundSlash3
     public const float SnapperHeadOffset     = 6f;                // px from cell centre, away from the root
+
+    // ── Siege pod (§4.4; the shot itself is tuned in SiegeBlast) ────────────
+    public const float SiegePodGrowSeconds   = 20f;               // growth = telegraph; fires on ripening
+    public const float SiegePodChargeSeconds = 1.5f;              // last stretch of growth: the urgent tell
+    public const float SiegePodHealth        = 1.5f;              // mature pool; it fires on maturing, so in
+                                                                  // practice it lives on SeedlingHealth
+    public const int   SiegePodPerPlayer     = 1;                 // alive at once, per player
+    public const float SiegePodFireLinger    = 0.35f;             // render-only Fire pose after the shot (unhittable)
+    public const float SiegePodMinDrag       = 0.5f * Chunk.TileSize;   // shorter drag ⇒ the default aim
 }

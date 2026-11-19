@@ -19,7 +19,7 @@ public static class SeedPlanting
         SeedKind.Spitter    => true,
         SeedKind.Snapper    => true,
         SeedKind.Thorns     => true,
-        SeedKind.SiegePod   => false,   // milestone M3
+        SeedKind.SiegePod   => true,
         SeedKind.BlockEater => true,
         _                   => false,
     };
@@ -54,7 +54,10 @@ public static class SeedPlanting
                 if (meters != null && !meters.TrySpendUnits(PlantTuning.CostFor(req.Seed))) return false;
                 return chunks.TryPlantThornPatch(req.CellX, req.CellY, (byte)req.Team);
             case SeedKind.SiegePod:
-                return false; // filled by milestone M3 (req.Aim is the drag vector)
+                // Aim fixed here, from the press → release drag (a ~zero drag aims away
+                // from the root face). Evaluate already applied the one-alive rule.
+                plant = new SiegePodPlant(site, req.Owner, req.Faction, req.Team, req.Aim);
+                break;
             case SeedKind.BlockEater:
                 // Not an entity either: an infection in World/BlockEaterInfection.cs, planted ON
                 // an enemy-owned block. Evaluate asked CanPlantBlockEater this frame.

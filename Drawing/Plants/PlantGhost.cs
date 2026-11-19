@@ -16,20 +16,43 @@ public static class PlantGhost
         if (player == null || chunks == null || !player.SeedBarActive) return;
         int cx = (int)System.MathF.Floor(cursorWorld.X / Chunk.TileSize);
         int cy = (int)System.MathF.Floor(cursorWorld.Y / Chunk.TileSize);
+        // A release-commit seed being aimed (the siege pod, §3): the ghost stays on the press
+        // cell and the drag from the press point is the aim — exactly what the release plants.
+        var drag = Vector2.Zero;
+        bool aiming = player.CurrentAction is BlockPlaceAction && player.CurrentActionVars.SeedMode
+                      && player.CurrentActionVars.SeedArmed && SeedPlanting.CommitsOnRelease(player.SelectedSeed);
+        if (aiming)
+        {
+            var v = player.CurrentActionVars;
+            cx = (int)v.OriginCell.X;
+            cy = (int)v.OriginCell.Y;
+            drag = cursorWorld - v.BallPos;
+        }
         var req = new PlantRequest
         {
             Seed = player.SelectedSeed, Owner = player.Id, Faction = player.Faction, Team = player.Team,
-            OwnerPos = player.Body.Position, CellX = cx, CellY = cy,
+            OwnerPos = player.Body.Position, CellX = cx, CellY = cy, Aim = drag,
         };
         var verdict = PlantRules.Evaluate(in req, chunks, entities, player.Abilities.Meters, out var site);
         bool ok = verdict == PlantVerdict.Ok;
         var center = new Vector2((cx + 0.5f) * Chunk.TileSize, (cy + 0.5f) * Chunk.TileSize);
         // Oriented onto whatever root the cell has even when another rule rejects it (out
         // of reach, capped); a cell with no root at all is shown upright.
-        float rot = PlantRules.TryFindSite(req.Seed, chunks, cx, cy, out var any) ? PlantRules.RotationOf(any.Root) : 0f;
+        bool rooted = PlantRules.TryFindSite(req.Seed, chunks, cx, cy, out var any);
+        float rot = rooted ? PlantRules.RotationOf(any.Root) : 0f;
         var tint = (ok ? PlantPalette.Legal : PlantPalette.Illegal) * (ok ? 0.55f : 0.4f);
 
-        PoseTelegraph.Emit(t, Silhouette(req.Seed), center, rot, tint);
+        if (req.Seed == SeedKind.SiegePod)
+        {
+            // The pod takes its aim, and shows the lance it would fire from the would-be
+            // muzzle (the same Preview its growth telegraph draws). Brighter while aiming.
+            var podSite = rooted ? any : new PlantSite(cx, cy, PlantRoot.Below);
+            var aim = SiegePodPlant.AimFor(podSite, drag);
+            PoseTelegraph.Emit(t, SiegePodAnims.Silhouette(System.MathF.Atan2(aim.Y, aim.X) - rot), center, rot, tint);
+            if (rooted) SiegeBlast.Telegraph(t, chunks, SiegePodPlant.MuzzleFor(podSite), aim, aiming ? 0.6f : 0.15f);
+        }
+        else
+            PoseTelegraph.Emit(t, Silhouette(req.Seed), center, rot, tint);
 
         const float h = Chunk.TileSize * 0.5f;
         var edge = (ok ? PlantPalette.Legal : PlantPalette.Illegal) * 0.5f;
@@ -56,6 +79,7 @@ public static class PlantGhost
     {
         SeedKind.Spitter => SpitterFigure.Silhouette,
         SeedKind.Snapper => SnapperAnims.Silhouette,
+        SeedKind.SiegePod => SiegePodAnims.Silhouette(-MathHelper.PiOver2),   // default aim: straight up
         _                => GenericSilhouette,
     };
 

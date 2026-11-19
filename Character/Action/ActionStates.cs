@@ -3390,11 +3390,10 @@ public class BlockPlaceAction : ActionState
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
-        // Blocks: nothing to show — the placed tile is the feedback. A release-commit seed
-        // being aimed shows its drag (the siege pod parcel draws the real aim line).
-        if (!vars.SeedMode || !vars.SeedArmed) return;
-        var press = BlockEruptionHelpers.CellCenter((int)vars.OriginCell.X, (int)vars.OriginCell.Y);
-        t.Ring(press, 4f, new Color(255, 230, 150) * 0.6f, 10, 1f);
+        // Nothing to show here. Blocks: the placed tile is the feedback. A release-commit seed
+        // being aimed (the siege pod): the cursor ghost (Drawing/Plants/PlantGhost.cs) draws the
+        // pod on the press cell and its real aim line — it has the terrain and the cursor this
+        // hook lacks.
     }
 }
 
