@@ -143,7 +143,7 @@ public static class EntityFactory
             // Plants (Entities/Plants): the site/owner come back from EntityData.Plant, the
             // rest through RestoreState. One line per kind — M3-M6 fill their own.
             EntityKind.PlantSpitter    => SpitterPlant.FromState(in d, body.Position),
-            // EntityKind.PlantSnapper    => SnapperPlant.FromState(in d, body.Position),    // milestone M5
+            EntityKind.PlantSnapper    => SnapperPlant.FromState(in d, body.Position),
             // EntityKind.PlantThorns     => ThornsPlant.FromState(in d, body.Position),     // milestone M4
             // EntityKind.PlantSiegePod   => SiegePodPlant.FromState(in d, body.Position),   // milestone M3
             // EntityKind.PlantBlockEater => BlockEaterPlant.FromState(in d, body.Position), // milestone M6

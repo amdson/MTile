@@ -17,7 +17,7 @@ public static class SeedPlanting
     public static bool IsImplemented(SeedKind seed) => seed switch
     {
         SeedKind.Spitter    => true,
-        SeedKind.Snapper    => false,   // milestone M5
+        SeedKind.Snapper    => true,
         SeedKind.Thorns     => true,
         SeedKind.SiegePod   => false,   // milestone M3
         SeedKind.BlockEater => false,   // milestone M6
@@ -45,7 +45,8 @@ public static class SeedPlanting
                 plant = new SpitterPlant(site, req.Owner, req.Faction, req.Team);
                 break;
             case SeedKind.Snapper:
-                return false; // filled by milestone M5
+                plant = new SnapperPlant(site, req.Owner, req.Faction, req.Team);
+                break;
             case SeedKind.Thorns:
                 // Not an entity: a thorn patch is tile state (World/ThornPatches.cs). Evaluate
                 // already asked CanPlantThornPatch this frame, so the plant cannot fail after

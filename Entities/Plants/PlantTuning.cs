@@ -58,7 +58,7 @@ public static class PlantTuning
     // Derived from stone's loaded build cost, as spikes are, so a material retune keeps
     // the relative price. A spitter is about ten stone tiles.
     public const float SpitterCostInStone    = 10f;
-    public const float SnapperCostInStone    = 10f;
+    public const float SnapperCostInStone    = 12f;
     public const float ThornsCostInStone     = 8f;
     public const float SiegePodCostInStone   = 16f;
     public const float BlockEaterCostInStone = 12f;
@@ -87,4 +87,21 @@ public static class PlantTuning
     public const float SpitterShotDamage     = 0.25f;             // poke tier: a held guard blocks it
     public const float SpitterShotLifetime   = SpitterRange / SpitterShotSpeed + 0.25f;
     public const float SpitterMouthOffset    = 5f;                // px from cell centre, away from the root
+
+    // ── Snapper (§4.2) ──────────────────────────────────────────────────────
+    public const float SnapperGrowSeconds    = 14f;
+    public const float SnapperHealth         = 2.2f;              // sturdier than the spitter (1.5)
+    public const float SnapperRangeTiles     = 2f;                // target trigger, head to body centre
+    public const float SnapperRange          = SnapperRangeTiles * Chunk.TileSize;
+    public const float SnapperWindup         = 0.4f;              // the readable tell
+    public const float SnapperBiteActive     = 0.15f;             // seconds the bite hitbox is live
+    public const float SnapperRearm          = 4f;                // spent, harmless, after a bite
+    public const float SnapperTrackSpeed     = 40f;               // px/s the aim may chase the target during wind-up
+    public const float SnapperBiteReach      = 2.6f * Chunk.TileSize;   // box length from the head
+    public const float SnapperBiteWidth      = 1.6f * Chunk.TileSize;
+    public const float SnapperBiteDamage     = 0.7f;              // heavy tier: beats a held guard (> 0.5)
+    public const float SnapperKnockback      = 150f;
+    public const float SnapperHitstun        = 0.35f;
+    public const float SnapperLaunchDecay    = 350f;              // as GroundSlash3
+    public const float SnapperHeadOffset     = 6f;                // px from cell centre, away from the root
 }

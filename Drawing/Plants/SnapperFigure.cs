@@ -30,6 +30,11 @@ public static class SnapperFigure
     // walls: +y down).
     public enum RootFace { Floor, Ceiling, WallOnLeft, WallOnRight }
 
+    public const float PulseOmega  = 14f;                       // wind-up flash, rad/s (~2.2 Hz)
+    public const float WindupLoop  = MathF.PI * 2f / PulseOmega;   // seconds per flash period
+    public const float IdleOmega   = 2f;                        // idle sway, rad/s
+    public const float IdleLoop    = MathF.PI * 2f / IdleOmega; // seconds per sway period
+
     public const float StalkHeight = 11f;   // mature stalk length, px
     public const float JawLength   = 8f;    // mature jaw length, px
 
@@ -62,7 +67,7 @@ public static class SnapperFigure
         rearm01  = MathHelper.Clamp(rearm01, 0f, 1f);
         float g = MathHelper.Lerp(0.45f, 1f, growth01);
         float dir = lean < -0.001f ? -1f : 1f;                  // which way a hanging head falls
-        float sway = MathF.Sin(time * 2.1f) * 0.5f + MathF.Sin(time * 3.3f + 1f) * 0.25f;
+        float sway = MathF.Sin(time * IdleOmega) * 0.5f + MathF.Sin(time * 2f * IdleOmega + 1f) * 0.25f;   // period IdleLoop
         float up = -MathHelper.PiOver2;
 
         switch (pose)
@@ -75,8 +80,10 @@ public static class SnapperFigure
                 break;
             case State.WindUp:
             {
-                float shake = MathF.Sin(time * 55f) * 0.5f;
-                float pulse = 0.5f + 0.5f * MathF.Sin(time * 26f);
+                // Flash rate is capped (photosensitivity): PulseOmega = 14 rad/s ~ 2.2 Hz; the
+                // positional shake is 3x that (~6.7 Hz) so one WindupLoop tiles both exactly.
+                float shake = MathF.Sin(time * 3f * PulseOmega) * 0.5f;
+                float pulse = 0.5f + 0.5f * MathF.Sin(time * PulseOmega);
                 float nx = -dir * 4.0f * g + shake;
                 Plant(b, team, g, nx: nx, hf: 0.9f, phi: up - dir * 0.55f, open: 1.0f, armed: 1f, flash: pulse, lunge: 0f);
                 Ticks(b, g, nx, StalkHeight * g * 0.9f, pulse);
@@ -321,7 +328,7 @@ public static class SnapperFigure
             RootFace.Ceiling     => new Vector2(p.X, -p.Y),
             RootFace.WallOnLeft  => new Vector2(-p.Y, p.X),
             RootFace.WallOnRight => new Vector2(p.Y, p.X),
-            _ => p,
+            _ => new Vector2(p.X, p.Y + PlantFigureKit.RootY),   // floor: surface at the cell's bottom edge
         };
 
         private Color C(Color c) => _ghost ? c * 0.7f : c;

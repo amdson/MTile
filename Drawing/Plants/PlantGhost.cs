@@ -55,6 +55,7 @@ public static class PlantGhost
     public static Pose Silhouette(SeedKind seed) => seed switch
     {
         SeedKind.Spitter => SpitterFigure.Silhouette,
+        SeedKind.Snapper => SnapperAnims.Silhouette,
         _                => GenericSilhouette,
     };
 
