@@ -327,6 +327,11 @@ Supervisor integrates; parcels are built by subagents in their own worktrees and
   fire on dirt arenas such as `garden`; the league arenas are stone.
 - Scope trimmed at the user's request: the base-vs-branch red triage run was stopped, and the bot
   evaluation harness was removed. Remaining reds are compared to BACKLOG §5 by name only.
+- Visual QA merged @2cce8c1: a debug showcase stage (`plant_show`, `plant_show_faces`, `_bite`,
+  `_wallbite`, `_ceilbite`, `_thorns`, `_eater`, `_ghost`; not in the lobby) and five render fixes
+  (team-coloured spit, buried figures fit their cell, HUD label overlap, label alignment, per-seed
+  swatch glyphs). Spitter, snapper, thorns, block-eater, ghost, HUD and the garden stage have now
+  been seen in the real renderer. The siege pod has NOT. 132 tests green.
 - Baseline reds: the combat+terrain+simcore groups show ~40 reds outside plant code, over a dozen
   of them not in BACKLOG §5's table. To be triaged at M9, not assumed pre-existing.
 
