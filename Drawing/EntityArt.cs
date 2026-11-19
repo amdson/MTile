@@ -236,6 +236,9 @@ public sealed class EntityArtSystem
     public static VisualState Describe(Entity e)
     {
         var s = new VisualState { Facing = 1, Moving = MathF.Abs(e.Body.Velocity.X) > 15f };
+        // Plants report their pose as the action name ("seed", "sprout", "idle", "act",
+        // "dormant", "wilt"), so a sheet's tags can follow the plant's real states.
+        if (e is PlantEntity plant) { s.Action = plant.Pose.ToString().ToLowerInvariant(); return s; }
         if (e is not EnemyEntity enemy) return s;
         s.Facing = enemy.Facing == 0 ? 1 : enemy.Facing;
         s.Hurt = enemy.IsStaggered;

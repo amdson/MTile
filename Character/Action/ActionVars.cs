@@ -83,6 +83,13 @@ public struct ActionVars
     // the stroke paints spike tiles and the eruption is a crystal wave. Latched at the
     // press; switching material ends the hold.
     public bool    SpikeMode;
+    // BlockPlaceAction seed mode (Plans/PLANT_SEEDS_PLAN.md §3): the hold started on the
+    // seed bar, so it plants instead of placing blocks. Latched at the press; swapping bars
+    // ends the hold. SeedArmed: this hold began on an RMB press edge and still owes its
+    // one planting (a release-commit seed plants on release, at OriginCell, aimed by the
+    // drag from BallPos — the press point).
+    public bool    SeedMode;
+    public bool    SeedArmed;
 
     public Vector2 GrabDir;           // GrabAction — hold focus / throw direction
     public Vector2 GuardDir;          // Guard — unit aim (body → cursor), tracked every frame;

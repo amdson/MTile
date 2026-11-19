@@ -3089,6 +3089,9 @@ public class BlockPaintAction : ActionState
         // Plain RMB, no press-edge requirement: this is the resting state of a held right
         // button, so it also resumes after an attack interrupted a stroke.
         if (!ctx.Input.RightClick || ctx.Input.Shift) return false;
+        // On the seed bar plain RMB plants (BlockPlaceAction's seed mode): no paint stroke,
+        // no eruption charge.
+        if (ctx.SeedBarActive) return false;
         // With spikes selected plain RMB still lands here, in SPIKE MODE (see below): the
         // same gesture, with spikes for mass and a crystal wave for the eruption.
         return ctx.Combat?.HitstunActive != true;
@@ -3099,7 +3102,7 @@ public class BlockPaintAction : ActionState
     // it (the mode was latched at the press); the still-held button re-enters fresh in
     // the other mode.
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => ctx.Input.RightClick && ctx.SpikesSelected == vars.SpikeMode;
+        => ctx.Input.RightClick && ctx.SpikesSelected == vars.SpikeMode && !ctx.SeedBarActive;
 
     // ── Spike mode (todo.txt #7) ───────────────────────────────────────────────────
     //
@@ -3304,8 +3307,10 @@ public class BlockPlaceAction : ActionState
 
     // Shift+RMB places one block per cell — spikes included: Spike is just the selected
     // material, placed as a spike tile on an empty cell touching solid on any face.
+    // On the seed bar plain RMB lands here too (seed mode): a paint stroke of capped
+    // plants means nothing, so both gestures plant one seed per press.
     private static bool Held(EnvironmentContext ctx)
-        => ctx.Input.RightClick && ctx.Input.Shift;
+        => ctx.Input.RightClick && (ctx.Input.Shift || ctx.SeedBarActive);
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
@@ -3313,19 +3318,35 @@ public class BlockPlaceAction : ActionState
         return ctx.Combat?.HitstunActive != true;
     }
 
+    // Swapping bars mid-hold ends it (the mode was latched at the press).
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => Held(ctx);
+        => Held(ctx) && ctx.SeedBarActive == vars.SeedMode;
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState = 0f;
         // Sentinel so the press frame itself places: no cell has been placed yet.
         vars.OriginCell = new Vector2(float.NaN, float.NaN);
+        vars.SeedMode   = ctx.SeedBarActive;
+        vars.SeedArmed  = false;
+        if (!vars.SeedMode) return;
+
+        // Seed mode: ONE planting per RMB press. Only a hold that starts on the press edge
+        // is armed, so a hold resumed after an attack preempted it plants nothing.
+        bool pressEdge = ctx.Controller == null || !ctx.Controller.GetPrevious(1).RightClick;
+        if (!pressEdge) return;
+        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+        vars.OriginCell = new Vector2(gtx, gty);              // the press cell (cell indices)
+        vars.BallPos    = ctx.Input.MouseWorldPosition;       // the press point (drag origin)
+        vars.SeedArmed  = true;
+        if (SeedPlanting.CommitsOnRelease(ctx.SelectedSeed)) return;   // planted in Exit
+        PlantSeed(ctx, ab, ref vars, Vector2.Zero);
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState += ctx.Dt;
+        if (vars.SeedMode) return;   // seeds act on the press (Enter) or release (Exit)
 
         var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
         var cell = BlockEruptionHelpers.CellCenter(gtx, gty);
@@ -3348,9 +3369,32 @@ public class BlockPlaceAction : ActionState
         vars.OriginCell = cell;
     }
 
+    // A release-commit seed (the siege pod) plants on a natural release — RMB up — at the
+    // press cell, aimed by the press → release drag. A preempt (RMB still held) or a bar
+    // swap forfeits it.
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        if (!vars.SeedMode || !vars.SeedArmed) return;
+        if (ctx.Input.RightClick) return;
+        if (!SeedPlanting.CommitsOnRelease(ctx.SelectedSeed)) return;
+        PlantSeed(ctx, ab, ref vars, ctx.Input.MouseWorldPosition - vars.BallPos);
+    }
+
+    private static void PlantSeed(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars, Vector2 aim)
+    {
+        vars.SeedArmed = false;
+        var req = SeedPlanting.RequestFrom(ctx, ctx.SelectedSeed,
+                                           (int)vars.OriginCell.X, (int)vars.OriginCell.Y, aim);
+        SeedPlanting.TryPlant(in req, ab.Meters, ctx.Chunks, ctx.Spawner);
+    }
+
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
-        // Nothing to show — the placed tile is the feedback.
+        // Blocks: nothing to show — the placed tile is the feedback. A release-commit seed
+        // being aimed shows its drag (the siege pod parcel draws the real aim line).
+        if (!vars.SeedMode || !vars.SeedArmed) return;
+        var press = BlockEruptionHelpers.CellCenter((int)vars.OriginCell.X, (int)vars.OriginCell.Y);
+        t.Ring(press, 4f, new Color(255, 230, 150) * 0.6f, 10, 1f);
     }
 }
 

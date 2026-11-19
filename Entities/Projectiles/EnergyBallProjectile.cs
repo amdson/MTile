@@ -50,9 +50,15 @@ public class EnergyBallProjectile : Projectile
     // `speed` / `damage` default to the stock ball. An enemy ranged action passes
     // its ActionSpec's values; the player's EnergyBallAction and Rehydrate pass
     // what they have (Rehydrate: the snapshotted damage, or 0 ⇒ stock).
+    // `lifetime` (0 ⇒ stock) lets a slow ball still cover its range (the spitter plant);
+    // Rehydrate need not pass it — Projectile.ReadState restores Lifetime. `pierce` false
+    // drops the impact profile, so the ball just dies on the first terrain it meets
+    // instead of breaking into it; Rehydrate passes back whether the snapshot had one.
     public EnergyBallProjectile(Vector2 pos, Vector2 dir, int hitId, Faction owner,
-                                float speed = DefaultSpeed, float damage = DefaultDamage)
-        : base(new PhysicsBody(Polygon.CreateRegular(4f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: owner)
+                                float speed = DefaultSpeed, float damage = DefaultDamage,
+                                float lifetime = 0f, bool pierce = true)
+        : base(new PhysicsBody(Polygon.CreateRegular(4f, 6), pos), health: 0.1f,
+               lifetime: lifetime > 0f ? lifetime : LifeSeconds, owner: owner)
     {
         _hitId  = hitId;
         _damage = damage > 0f ? damage : DefaultDamage;
@@ -64,7 +70,7 @@ public class EnergyBallProjectile : Projectile
         // under the impulse threshold. Tuning lives in impact_profiles.json
         // under the "energy_ball" key (default thresholds are tight so a
         // single Stone won't stop it dead but a stack of 3 will).
-        Body.Impact = ImpactProfiles.Build(ImpactProfiles.EnergyBall);
+        if (pierce) Body.Impact = ImpactProfiles.Build(ImpactProfiles.EnergyBall);
         Mass         = 0.5f;
         GravityScale = 0f;
         Color        = Color.LightCyan;

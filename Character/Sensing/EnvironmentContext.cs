@@ -34,6 +34,11 @@ public class EnvironmentContext
     // Block picker key 5 selects the Spike material: the RMB gestures lay spike tiles
     // and the charged release launches the crystal wave instead of an avalanche.
     public bool SpikesSelected => ActiveBlockType == TileType.Spike;
+    // The seed bar is up (F): the place gesture plants SelectedSeed instead of a block,
+    // and plain RMB places (one seed per press) instead of painting. See
+    // BlockPlaceAction's seed mode and SeedPlanting.TryPlant.
+    public bool     SeedBarActive;
+    public SeedKind SelectedSeed;
     public IntentBuffer Intents;      // gesture-parsed action intents (Click, Stab, PressEdge); action FSM reads + consumes
     public ConditionState Condition;  // combat condition flags (Slash2Ready, RecoveryActive, …) — lives on PlayerAbilityState
     public CombatState    Combat;     // defensive condition: hitstun, stun, last-hit data — gates jump preconditions etc.

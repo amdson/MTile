@@ -157,6 +157,16 @@ public enum EntityKind
     // Both are FrogEnemy; see Entities/Enemies/Types/FrogEnemy.cs.
     Frog,
     FrogMutant,
+
+    // Plants (Plans/PLANT_SEEDS_PLAN.md) — rooted, owned, growable entities planted from
+    // the seed bar. All five kinds exist from M1 so the parallel parcels never fight over
+    // this enum; each is a PlantEntity subclass under Entities/Plants/. Thorns and the
+    // block-eater may end up as tile tables (§9) — their kinds are reserved regardless.
+    PlantSpitter,
+    PlantSnapper,
+    PlantThorns,
+    PlantSiegePod,
+    PlantBlockEater,
 }
 
 public static class EntityKinds

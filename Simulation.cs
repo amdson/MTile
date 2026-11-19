@@ -341,6 +341,14 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         get { var l = new List<Entity>(); foreach (var r in _world.Query<EntityRef>()) l.Add(r.Component1.Obj); return l; }
     }
     IEnumerable<Entity> IEntitySpawner.LiveEntities => Entities;
+    IEnumerable<PlayerCharacter> IEntitySpawner.Players
+    {
+        get
+        {
+            yield return _player;
+            foreach (var (p, _) in _secondaryPlayers) yield return p;
+        }
+    }
     IReadOnlyDictionary<EntityKind, EnemyBlueprint> IEntitySpawner.BlueprintTable => Blueprints;
     public IReadOnlyList<(MovingRectangle Rect, Color Color)> Platforms => _platforms;
     public IReadOnlyList<PhysicsBody> Bodies

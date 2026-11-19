@@ -110,7 +110,8 @@ public static class EntityFactory
             EntityKind.Generic       => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
             EntityKind.Bullet        => new BulletProjectile(body.Position, body.Velocity, hitIds),
             // Speed rides in body.Velocity; damage comes back through ProjDamage.
-            EntityKind.EnergyBall    => new EnergyBallProjectile(body.Position, body.Velocity, d.HitId, d.Faction, damage: d.ProjDamage),
+            EntityKind.EnergyBall    => new EnergyBallProjectile(body.Position, body.Velocity, d.HitId, d.Faction, damage: d.ProjDamage,
+                                                                 pierce: d.Impact != null),
             EntityKind.FighterMine   => FighterMine.FromState(in d, body.Position),
             EntityKind.StickyGrenade => new StickyGrenadeProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.LobbedArea    => new LobbedAreaProjectile(body.Position, body.Velocity, d.Budget, d.TileType, d.HitId, d.Faction),
@@ -139,6 +140,13 @@ public static class EntityFactory
             EntityKind.HoverTarget   => HoverTarget.FromState(in d, body.Position),
             // Fuse position (Age) and the fired flag come back through RestoreState.
             EntityKind.ChargedBlast  => new ChargedBlast(body.Position, d.HitId),
+            // Plants (Entities/Plants): the site/owner come back from EntityData.Plant, the
+            // rest through RestoreState. One line per kind — M3-M6 fill their own.
+            EntityKind.PlantSpitter    => SpitterPlant.FromState(in d, body.Position),
+            // EntityKind.PlantSnapper    => SnapperPlant.FromState(in d, body.Position),    // milestone M5
+            // EntityKind.PlantThorns     => ThornsPlant.FromState(in d, body.Position),     // milestone M4
+            // EntityKind.PlantSiegePod   => SiegePodPlant.FromState(in d, body.Position),   // milestone M3
+            // EntityKind.PlantBlockEater => BlockEaterPlant.FromState(in d, body.Position), // milestone M6
             _ when EnemyFactory.IsRegistered(d.Kind) => EnemyFactory.Create(d.Kind, body.Position),
             // A fighter kind that is NOT registered (an arena slot the caller never
             // filled) must not fall through to a generic entity — Create throws with

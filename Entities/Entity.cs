@@ -319,6 +319,10 @@ public interface IEntitySpawner
     // The sim's own enemy-blueprint table, for spawning enemies by kind
     // (EntityFactory.CreateEnemy). Default null: only registry/subclass kinds resolve.
     IReadOnlyDictionary<EntityKind, EnemyBlueprint> BlueprintTable => null;
+    // Every player in the sim's fixed order (primary, then secondaries in add order),
+    // dead ones included — callers filter IsAlive. For entities that pick among players
+    // by team (the spitter plant). Default empty for stubs.
+    IEnumerable<PlayerCharacter> Players => System.Array.Empty<PlayerCharacter>();
 }
 
 // Entities that show something beyond their Sprite in the world-space overlay pass

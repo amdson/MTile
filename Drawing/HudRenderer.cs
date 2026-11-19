@@ -103,6 +103,8 @@ public sealed class HudRenderer
         int x0        = viewportW - RightPadding - totalW;
         int y0        = TopPadding;
 
+        if (player.SeedBarActive) { DrawSeedPickerHud(player, x0, y0, SwatchSize, SwatchGap, LabelOffset); return; }
+
         var activeBlockType = player.ActiveBlockType;
         bool spikes = player.SpikesSelected;
         for (int i = 0; i < Slots; i++)
@@ -131,6 +133,52 @@ public sealed class HudRenderer
 
         _spriteBatch.DrawString(_debugFont, spikes ? "Spikes" : activeBlockType.ToString(),
             new Vector2(x0, y0 + LabelOffset + 16), Color.White);
+    }
+
+    // The seed bar (F swaps to it): one swatch per SeedKind in key order, a sprout glyph on
+    // each, the selected one bright and outlined, with its name and price underneath. Seeds
+    // whose milestone has not landed yet are drawn crossed out.
+    private void DrawSeedPickerHud(PlayerCharacter player, int x0, int y0, int size, int gap, int labelOffset)
+    {
+        var seeds = (SeedKind[])Enum.GetValues(typeof(SeedKind));
+        var team = PlantPalette.Team(player.Team);
+        for (int i = 0; i < seeds.Length; i++)
+        {
+            var k = seeds[i];
+            int x = x0 + i * (size + gap);
+            bool selected = k == player.SelectedSeed;
+            var col = PlantPalette.SeedSwatch(k);
+            var fill = selected ? col : new Color((int)(col.R * 0.4f), (int)(col.G * 0.4f), (int)(col.B * 0.4f));
+            _spriteBatch.Draw(_pixel, new Rectangle(x, y0, size, size), fill);
+            var border = selected ? team : new Color(80, 80, 80);
+            _spriteBatch.Draw(_pixel, new Rectangle(x,            y0,            size, 1), border);
+            _spriteBatch.Draw(_pixel, new Rectangle(x,            y0 + size - 1, size, 1), border);
+            _spriteBatch.Draw(_pixel, new Rectangle(x,            y0,            1, size), border);
+            _spriteBatch.Draw(_pixel, new Rectangle(x + size - 1, y0,            1, size), border);
+            SproutGlyph(x, y0, size, selected ? Color.White : new Color(150, 150, 150));
+            if (!SeedPlanting.IsImplemented(k))
+                for (int d = 2; d < size - 2; d++)
+                    _spriteBatch.Draw(_pixel, new Rectangle(x + d, y0 + d, 1, 1), new Color(40, 40, 40));
+            _spriteBatch.DrawString(_debugFont, (i + 1).ToString(),
+                new Vector2(x + size / 2f - 4, y0 + labelOffset),
+                selected ? Color.White : new Color(160, 160, 160));
+        }
+        var sel = player.SelectedSeed;
+        _spriteBatch.DrawString(_debugFont, $"Seed: {sel}  ({PlantTuning.CostFor(sel):0})",
+            new Vector2(x0, y0 + labelOffset + 16), Color.White);
+    }
+
+    // A stem with two leaves and a bud, so the seed bar never reads as more materials.
+    private void SproutGlyph(int x, int y, int size, Color color)
+    {
+        int cx = x + size / 2;
+        _spriteBatch.Draw(_pixel, new Rectangle(cx, y + size / 3, 1, size / 2), color);
+        for (int k = 0; k < 4; k++)
+        {
+            _spriteBatch.Draw(_pixel, new Rectangle(cx - 1 - k, y + size - 6 - k, 1, 1), color);
+            _spriteBatch.Draw(_pixel, new Rectangle(cx + 1 + k, y + size - 6 - k, 1, 1), color);
+        }
+        _spriteBatch.Draw(_pixel, new Rectangle(cx - 2, y + size / 3 - 3, 5, 4), color);
     }
 
     // Three little teeth along the bottom of a swatch, so the spike slot reads as

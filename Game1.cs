@@ -1472,6 +1472,8 @@ public class Game1 : Game
             p.CurrentAction.Telegraph(_telegraphs, p.Body, p.CurrentActionVars);
         foreach (var e in _sim.Entities)
             if (e is ITelegraphSource ts) ts.Telegraph(_telegraphs);
+        // Seed-bar cursor ghost for the player at this keyboard (render-only).
+        PlantGhost.Emit(_telegraphs, LocalPlayer, _sim.Chunks, _sim.Entities, LocalHeldInput.MouseWorldPosition);
         TelegraphRenderer.Draw(_draw, _telegraphs, _vfx);
         _prof.End(_sParticles, tFx);
 

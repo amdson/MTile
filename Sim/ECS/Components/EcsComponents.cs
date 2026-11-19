@@ -231,6 +231,10 @@ public struct EntityData
     public Vector2  ContactVelocity;// ball: velocity at the touch (aims the core hit)
     public float    CarryTime;    // ball: seconds held while the point was driven (dissipation clock)
     public float    ChaseTime;    // ball: seconds chasing a released point (detach cap)
+
+    // Plants (Entities/Plants/PlantEntity.cs): every rollback-varying field of a plant,
+    // in its own block rather than squatting on the projectile slots above.
+    public PlantData Plant;
 }
 
 // Everything a PlayerCharacter needs snapshotted EXCEPT its body pose (BodyStateComp)
@@ -271,6 +275,10 @@ public struct PlayerData
 
     // Player-local selection.
     public TileType ActiveBlockType;
+    // Seed bar (Plans/PLANT_SEEDS_PLAN.md §3): which bar the number row drives, and the
+    // seed picked on it. Both survive a swap and ride the snapshot like ActiveBlockType.
+    public bool     SeedBarActive;
+    public SeedKind SelectedSeed;
 
     // Deep-copy the reference members so a captured/restored PlayerData never shares
     // mutable state with the live player or with another (repeated-restore) copy. Value

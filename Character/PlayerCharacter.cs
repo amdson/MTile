@@ -503,6 +503,24 @@ public class PlayerCharacter : IHittable
     // lay spike tiles, and a charged release launches the crystal wave.
     public bool SpikesSelected => _activeBlockType == TileType.Spike;
 
+    // The seed bar (Plans/PLANT_SEEDS_PLAN.md §3). F (press edge) flips the number row
+    // between the block bar and the seed bar; on the seed bar 1-5 pick a SeedKind and the
+    // place gesture plants it (BlockPlaceAction's seed mode). Each bar remembers its own
+    // selection across swaps. Player-local, driven by this player's own input, snapshotted
+    // beside _activeBlockType.
+    private bool     _seedBarActive;
+    private SeedKind _selectedSeed = SeedKind.Spitter;
+    public bool SeedBarActive
+    {
+        get => _seedBarActive;
+        set => _seedBarActive = value;
+    }
+    public SeedKind SelectedSeed
+    {
+        get => _selectedSeed;
+        set { if (value >= SeedKind.Spitter && value <= SeedKind.BlockEater) _selectedSeed = value; }
+    }
+
     public MovementState GetPreviousState(int framesBack)
     {
         if ((uint)framesBack >= HistorySize) return null;
@@ -728,11 +746,25 @@ public class PlayerCharacter : IHittable
         // level-triggered (re-assign harmlessly). Formerly interpreted in
         // Game1/Simulation against a global static — now player-local and
         // rollback-deterministic. (The P planner toggle that lived here is gone.)
-        if (input.Num1) _activeBlockType = TileType.Stone;
-        if (input.Num2) _activeBlockType = TileType.Dirt;
-        if (input.Num3) _activeBlockType = TileType.Sand;
-        if (input.Num4) _activeBlockType = TileType.Foam;
-        if (input.Num5) _activeBlockType = TileType.Spike;
+        // F (press edge) swaps the number row between the block bar and the seed bar.
+        // Edge from the controller ring, like Space: a held F toggles once.
+        if (input.F && !prev.F) _seedBarActive = !_seedBarActive;
+        if (_seedBarActive)
+        {
+            if (input.Num1) _selectedSeed = SeedKind.Spitter;
+            if (input.Num2) _selectedSeed = SeedKind.Snapper;
+            if (input.Num3) _selectedSeed = SeedKind.Thorns;
+            if (input.Num4) _selectedSeed = SeedKind.SiegePod;
+            if (input.Num5) _selectedSeed = SeedKind.BlockEater;
+        }
+        else
+        {
+            if (input.Num1) _activeBlockType = TileType.Stone;
+            if (input.Num2) _activeBlockType = TileType.Dirt;
+            if (input.Num3) _activeBlockType = TileType.Sand;
+            if (input.Num4) _activeBlockType = TileType.Foam;
+            if (input.Num5) _activeBlockType = TileType.Spike;
+        }
 
         _abilities.JumpJustPressed  = input.Space && !prev.Space;
         _abilities.UpJustPressed    = input.Up    && !prev.Up;
@@ -805,6 +837,8 @@ public class PlayerCharacter : IHittable
             HitIds         = HitIds,
             CombatSystem   = CombatSystem,
             ActiveBlockType = _activeBlockType,
+            SeedBarActive   = _seedBarActive,
+            SelectedSeed    = _selectedSeed,
             Intents        = _intents,
             UpHeldFrames         = _inputParser.UpHeldFrames(_frame),
             UpReleasedHoldFrames = _inputParser.UpReleasedHoldFrames(_frame),
@@ -1080,6 +1114,8 @@ public class PlayerCharacter : IHittable
         d.Parser             = _inputParser.Capture();
         d.Intents            = _intents.Capture();
         d.ActiveBlockType    = _activeBlockType;
+        d.SeedBarActive      = _seedBarActive;
+        d.SelectedSeed       = _selectedSeed;
         world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
 
@@ -1107,6 +1143,8 @@ public class PlayerCharacter : IHittable
         _intents.Restore(s.Intents);
 
         _activeBlockType = s.ActiveBlockType;
+        _seedBarActive   = s.SeedBarActive;
+        _selectedSeed    = s.SelectedSeed;
 
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
 

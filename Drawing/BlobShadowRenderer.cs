@@ -120,6 +120,12 @@ public sealed class BlobShadowRenderer
             case EntityKind.RayEmitter:
             case EntityKind.PullPoint:
             case EntityKind.GrabThrow:
+            // Plants are rooted in a cell face (walls and ceilings included): no shadow.
+            case EntityKind.PlantSpitter:
+            case EntityKind.PlantSnapper:
+            case EntityKind.PlantThorns:
+            case EntityKind.PlantSiegePod:
+            case EntityKind.PlantBlockEater:
                 return false;
             default:
                 return true;
