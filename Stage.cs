@@ -199,6 +199,7 @@ public static partial class Stages
         RegisterDepths();
         RegisterDuels();
         RegisterWallDummy();
+        RegisterPlantShow();   // debug: plant visual QA (Stages/PlantShowStage.cs)
 
         // ─── weights ──────────────────────────────────────────────────────────
         // Knockback-by-mass testbed: a flat walled hall with a row of passive balls

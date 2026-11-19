@@ -68,7 +68,10 @@ public sealed class HudRenderer
         const int BarW = 126, BarH = 7, Gap = 4;
         const int RightPadding = 12;
         int x = _graphicsDevice.Viewport.Width - RightPadding - BarW;
-        int y = 8 + 24 + 18;   // below the picker swatches + their labels
+        // Below the picker swatches (8 + 24), their key digits (+4) and the bar's name line
+        // (+16, ~16 tall): at 8 + 24 + 18 the bars sat ON the name line ("Dirt" / "Seed:
+        // Spitter (19)"), and the "res"/"mov" tags over its first letters.
+        int y = 8 + 24 + 4 + 16 + 22;
 
         void Bar(int yy, float frac, Color fill, string label)
         {
@@ -155,7 +158,7 @@ public sealed class HudRenderer
             _spriteBatch.Draw(_pixel, new Rectangle(x,            y0 + size - 1, size, 1), border);
             _spriteBatch.Draw(_pixel, new Rectangle(x,            y0,            1, size), border);
             _spriteBatch.Draw(_pixel, new Rectangle(x + size - 1, y0,            1, size), border);
-            SproutGlyph(x, y0, size, selected ? Color.White : new Color(150, 150, 150));
+            SeedGlyph(k, x, y0, size, selected ? Color.White : new Color(150, 150, 150));
             if (!SeedPlanting.IsImplemented(k))
                 for (int d = 2; d < size - 2; d++)
                     _spriteBatch.Draw(_pixel, new Rectangle(x + d, y0 + d, 1, 1), new Color(40, 40, 40));
@@ -164,21 +167,60 @@ public sealed class HudRenderer
                 selected ? Color.White : new Color(160, 160, 160));
         }
         var sel = player.SelectedSeed;
-        _spriteBatch.DrawString(_debugFont, $"Seed: {sel}  ({PlantTuning.CostFor(sel):0})",
-            new Vector2(x0, y0 + labelOffset + 16), Color.White);
+        // Right-aligned to the swatch row: left-aligned at x0, "Seed: BlockEater  (23)" ran
+        // off the right edge of the screen.
+        string label = $"Seed: {sel}  ({PlantTuning.CostFor(sel):0})";
+        int right = x0 + seeds.Length * (size + gap) - gap;
+        float lx = MathF.Min(x0, right - _debugFont.MeasureString(label).X);
+        _spriteBatch.DrawString(_debugFont, label, new Vector2(lx, y0 + labelOffset + 16), Color.White);
     }
 
-    // A stem with two leaves and a bud, so the seed bar never reads as more materials.
-    private void SproutGlyph(int x, int y, int size, Color color)
+    // One pictogram per seed, so the five swatches differ by SHAPE and not only by tint
+    // (the shared stem-and-bud glyph read as a row of identical down-arrows): a pod with a
+    // spout, open jaws, a barbed cane, a bulb with its aim line, a block with a vine bud.
+    // Each sits on a little soil line, so the seed bar never reads as more materials.
+    private void SeedGlyph(SeedKind kind, int x, int y, int size, Color c)
     {
-        int cx = x + size / 2;
-        _spriteBatch.Draw(_pixel, new Rectangle(cx, y + size / 3, 1, size / 2), color);
-        for (int k = 0; k < 4; k++)
+        int cx = x + size / 2, bot = y + size - 4;
+        void Px(int px, int py, int w = 1, int h = 1) => _spriteBatch.Draw(_pixel, new Rectangle(px, py, w, h), c);
+        void Ln(int x0, int y0, int x1, int y1)
         {
-            _spriteBatch.Draw(_pixel, new Rectangle(cx - 1 - k, y + size - 6 - k, 1, 1), color);
-            _spriteBatch.Draw(_pixel, new Rectangle(cx + 1 + k, y + size - 6 - k, 1, 1), color);
+            int n = Math.Max(Math.Abs(x1 - x0), Math.Abs(y1 - y0));
+            for (int i = 0; i <= n; i++)
+                Px(x0 + (int)MathF.Round((x1 - x0) * (n == 0 ? 0f : i / (float)n)),
+                   y0 + (int)MathF.Round((y1 - y0) * (n == 0 ? 0f : i / (float)n)));
         }
-        _spriteBatch.Draw(_pixel, new Rectangle(cx - 2, y + size / 3 - 3, 5, 4), color);
+        Px(x + 5, bot + 1, size - 10, 1);                       // soil line
+        switch (kind)
+        {
+            case SeedKind.Spitter:
+                Px(cx, y + 11, 1, bot - y - 10);                 // stem
+                Px(cx - 3, y + 5, 7, 6);                         // pod
+                Px(cx + 4, y + 4, 2, 2);                         // spout
+                Ln(cx, bot - 3, cx - 3, bot - 6); Ln(cx, bot - 3, cx + 3, bot - 6);
+                break;
+            case SeedKind.Snapper:
+                Px(cx, y + 12, 2, bot - y - 11);                 // thick stalk
+                Ln(cx, y + 12, cx - 6, y + 5); Ln(cx + 1, y + 12, cx + 7, y + 5);   // open jaws
+                Px(cx - 4, y + 9); Px(cx - 2, y + 11); Px(cx + 3, y + 11); Px(cx + 5, y + 9);   // teeth
+                break;
+            case SeedKind.Thorns:
+                Ln(x + 5, bot - 2, cx, y + 8); Ln(cx, y + 8, x + size - 6, bot - 3);   // arched cane
+                Ln(x + 7, bot - 5, x + 5, bot - 8); Ln(cx - 2, y + 11, cx - 4, y + 8);
+                Ln(cx + 3, y + 11, cx + 5, y + 8); Ln(x + size - 8, bot - 6, x + size - 6, bot - 9);
+                break;
+            case SeedKind.SiegePod:
+                Px(cx, bot - 5, 1, 5);                           // stub stem
+                Px(cx - 4, bot - 12, 9, 7);                      // swollen bulb
+                Ln(cx + 4, bot - 11, x + size - 4, y + 3);       // aim line
+                break;
+            default:   // BlockEater
+                Px(cx - 6, y + 9, 12, 1); Px(cx - 6, bot - 1, 12, 1);
+                Px(cx - 6, y + 9, 1, bot - y - 9); Px(cx + 5, y + 9, 1, bot - y - 9);   // the block
+                Ln(cx - 5, bot - 2, cx - 1, y + 12); Ln(cx - 1, y + 12, cx + 2, bot - 4);   // vine in it
+                Px(cx - 2, y + 5, 3, 3);                         // bud on top
+                break;
+        }
     }
 
     // Three little teeth along the bottom of a swatch, so the spike slot reads as

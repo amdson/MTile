@@ -17,6 +17,12 @@ public sealed class ScreenshotSystem
     private readonly int _autoShotFrame =
         int.TryParse(Environment.GetEnvironmentVariable("MTILE_SCREENSHOT_FRAME"), out var f) && f > 0 ? f : 20;
 
+    // MTILE_SCREENSHOT_MOUSE="fx,fy" pins the cursor for a headless capture at that
+    // fraction of the viewport (0.5,0.5 = centre), so the camera's cursor lead and anything
+    // aimed at the cursor (the seed-bar ghost) are reproducible instead of following
+    // wherever the OS pointer happens to sit. Desktop only; null when unset.
+    public (float X, float Y)? MouseOverride { get; private set; }
+
     private string _autoShotPath;
     private int    _frameCount;
     private bool   _shotPending;
@@ -30,6 +36,11 @@ public sealed class ScreenshotSystem
         if (OperatingSystem.IsBrowser()) return;
         _autoShotPath = Environment.GetEnvironmentVariable("MTILE_SCREENSHOT");
         if (!string.IsNullOrEmpty(_autoShotPath)) { _shotPending = true; _exitAfterShot = true; }
+        var m = Environment.GetEnvironmentVariable("MTILE_SCREENSHOT_MOUSE")?.Split(',');
+        if (m is { Length: 2 }
+            && float.TryParse(m[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fx)
+            && float.TryParse(m[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var fy))
+            MouseOverride = (fx, fy);
     }
 
     // F12: manual screenshot to a timestamped PNG next to the binary (desktop only).

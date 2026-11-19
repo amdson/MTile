@@ -77,6 +77,16 @@ public class EnergyBallProjectile : Projectile
         Sprite       = Sprites.Bullet(4f);
     }
 
+    // Render-only: a spitter's shot (tagged by PlantPalette.Spit, which survives a
+    // rollback rehydrate through Entity.Color) wears the spitter's seed-glob in its owner's
+    // colour instead of the stock orange bullet.
+    private bool _spitSkin;
+    public override void SyncSprite()
+    {
+        if (!_spitSkin && Color == PlantPalette.Spit) { Sprite = SpitterFigure.SpitSprite(Team); _spitSkin = true; }
+        base.SyncSprite();
+    }
+
     protected override void ProjectileUpdate(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
     {
         if (Age >= ArmDelay && Body.Velocity.LengthSquared() < CollisionStopSpeed * CollisionStopSpeed)
