@@ -30,15 +30,14 @@ public static class PlantGhost
         // Out in open air the ghost is just noise: draw nothing unless the cursor is near
         // ground. A live channel keeps its own site ghost wherever the cursor wanders.
         else if (!NearGround(chunks, cx, cy)) return;
-        var drag = cursorWorld - new Vector2((cx + 0.5f) * Chunk.TileSize, (cy + 0.5f) * Chunk.TileSize);
-        var req = new PlantRequest
-        {
-            Seed = player.SelectedSeed, Owner = player.Id, Faction = player.Faction, Team = player.Team,
-            OwnerPos = player.Body.Position, OwnerBounds = player.Body.Bounds, CellX = cx, CellY = cy, Aim = drag,
-        };
+        var drag = SeedPlanting.AimFrom(cx, cy, cursorWorld);
+        // The same request + verdict the seed-crouch gate and the channel use: legal FROM A
+        // CROUCH (the right-click crouches the player itself), so standing is not red. In
+        // the air a right-click does nothing, so it is.
+        var req = SeedPlanting.CrouchRequest(player.SelectedSeed, player.Id, player.Faction, player.Team,
+                                             player.Body, chunks, cx, cy, drag);
         var verdict = PlantRules.Evaluate(in req, chunks, entities, player.Abilities.Meters, out var site);
-        // Planting needs a crouch (the channel only starts crouched), so standing shows red.
-        bool ok = verdict == PlantVerdict.Ok && player.CurrentState is CrouchedState;
+        bool ok = verdict == PlantVerdict.Ok && player.IsGrounded;
         var center = new Vector2((cx + 0.5f) * Chunk.TileSize, (cy + 0.5f) * Chunk.TileSize);
         // Oriented onto whatever root the cell has even when another rule rejects it (out
         // of reach, capped); a cell with no root at all is shown upright.

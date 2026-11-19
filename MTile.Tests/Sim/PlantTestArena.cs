@@ -50,7 +50,8 @@ internal static class PlantTestArena
         for (int i = 0; i < n; i++) s.Step(default, default);
     }
 
-    // Planting is crouched, close work (PlantRules.InReach): hold Down until the crouch has
+    // Planting is crouched, close work (PlantRules.InReach). For direct TryPlant/Evaluate
+    // calls whose request uses the LIVE body box: hold Down until the crouch has
     // sunk (about 8 frames after CrouchedState enters), so the floor beside and beneath the
     // body is in reach.
     public static void Crouch(Simulation s, float seconds = 0.5f)

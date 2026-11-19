@@ -510,6 +510,15 @@ public class PlayerCharacter : IHittable
     // beside _activeBlockType.
     private bool     _seedBarActive;
     private SeedKind _selectedSeed = SeedKind.Spitter;
+    // The seed crouch (one-input planting): an RMB press on the seed bar, on the feet, latches
+    // the cursor cell; while the hold lasts and that cell stays legal from a crouch, this
+    // player asks movement to crouch (EnvironmentContext.SeedCrouch) without Down. Any frame
+    // the request fails (released, airborne, hit, out of reach, planted — the cell is then
+    // occupied) drops the latch for the rest of the hold, so a finished or cancelled channel
+    // never leaves the player pinned low. Input interpretation, snapshotted in PlayerData.
+    private bool     _seedCrouchLatched;
+    private Point    _seedCrouchCell;
+    public  bool     SeedCrouchActive { get; private set; }
     public bool SeedBarActive
     {
         get => _seedBarActive;
@@ -766,6 +775,8 @@ public class PlayerCharacter : IHittable
             if (input.Num5) _activeBlockType = TileType.Spike;
         }
 
+        SeedCrouchActive = SeedCrouchRequested(input, prev, chunks, spawner);
+
         _abilities.JumpJustPressed  = input.Space && !prev.Space;
         _abilities.UpJustPressed    = input.Up    && !prev.Up;
         _abilities.DownJustPressed  = input.Down  && !prev.Down;
@@ -839,6 +850,7 @@ public class PlayerCharacter : IHittable
             ActiveBlockType = _activeBlockType,
             SeedBarActive   = _seedBarActive,
             SelectedSeed    = _selectedSeed,
+            SeedCrouch      = SeedCrouchActive,
             Intents        = _intents,
             UpHeldFrames         = _inputParser.UpHeldFrames(_frame),
             UpReleasedHoldFrames = _inputParser.UpReleasedHoldFrames(_frame),
@@ -1069,6 +1081,33 @@ public class PlayerCharacter : IHittable
     }
 
     public bool IsGrounded => _currentState is StandingState || _currentState is CrouchedState;
+
+    // This frame's seed-crouch request: a pure function of this frame's input, the latch
+    // (snapshotted) and sim state. Latched at an RMB press edge on the seed bar while on the
+    // feet (Standing/Crouched) — the same cell and gate BlockPlaceAction arms its channel on.
+    private bool SeedCrouchRequested(PlayerInput input, PlayerInput prev, ChunkMap chunks, IEntitySpawner spawner)
+    {
+        if (!input.RightClick || !_seedBarActive) { _seedCrouchLatched = false; return false; }
+        if (!prev.RightClick && IsGrounded)
+        {
+            _seedCrouchLatched = true;
+            _seedCrouchCell = new Point((int)MathF.Floor(input.MouseWorldPosition.X / Chunk.TileSize),
+                                        (int)MathF.Floor(input.MouseWorldPosition.Y / Chunk.TileSize));
+        }
+        if (!_seedCrouchLatched) return false;
+        var c = _abilities.Combat;
+        bool ok = IsGrounded && !c.HitstunActive && !c.StunActive && !c.GrabbedActive && !c.Helpless
+                  && spawner != null;
+        if (ok)
+        {
+            var req = SeedPlanting.CrouchRequest(_selectedSeed, Id, Faction, Team, Body, chunks,
+                                                 _seedCrouchCell.X, _seedCrouchCell.Y,
+                                                 SeedPlanting.AimFrom(_seedCrouchCell.X, _seedCrouchCell.Y, input.MouseWorldPosition));
+            ok = SeedPlanting.LegalFromCrouch(in req, chunks, spawner.LiveEntities, _abilities.Meters);
+        }
+        if (!ok) _seedCrouchLatched = false;
+        return ok;
+    }
     // States where the body hangs on, slides down or rides a surface rather than flying.
     public static bool SurfaceAttached(MovementState s)
         => s is LedgeGrabState or LedgePullState or WallSlidingState or TerrainCarriedState
@@ -1116,6 +1155,8 @@ public class PlayerCharacter : IHittable
         d.ActiveBlockType    = _activeBlockType;
         d.SeedBarActive      = _seedBarActive;
         d.SelectedSeed       = _selectedSeed;
+        d.SeedCrouchLatched  = _seedCrouchLatched;
+        d.SeedCrouchCell     = _seedCrouchCell;
         world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
 
@@ -1145,6 +1186,8 @@ public class PlayerCharacter : IHittable
         _activeBlockType = s.ActiveBlockType;
         _seedBarActive   = s.SeedBarActive;
         _selectedSeed    = s.SelectedSeed;
+        _seedCrouchLatched = s.SeedCrouchLatched;
+        _seedCrouchCell    = s.SeedCrouchCell;
 
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
 

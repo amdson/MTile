@@ -39,6 +39,12 @@ public class EnvironmentContext
     // BlockPlaceAction's seed mode and SeedPlanting.TryPlant.
     public bool     SeedBarActive;
     public SeedKind SelectedSeed;
+    // A crouch request that is NOT the Down key: RMB held on the seed bar, on the ground, on
+    // a site legal from a crouch (PlayerCharacter.SeedCrouchRequested — a pure function of
+    // this frame's input and sim state). Read ONLY by CrouchedState, so none of Down's other
+    // meanings (dropdown off a ledge, fast-fall, ledge/wall drop, tumble DI) fire, and by
+    // CrouchSlashAction, which declines a crouch held only by this request.
+    public bool     SeedCrouch;
     public IntentBuffer Intents;      // gesture-parsed action intents (Click, Stab, PressEdge); action FSM reads + consumes
     public ConditionState Condition;  // combat condition flags (Slash2Ready, RecoveryActive, …) — lives on PlayerAbilityState
     public CombatState    Combat;     // defensive condition: hitstun, stun, last-hit data — gates jump preconditions etc.

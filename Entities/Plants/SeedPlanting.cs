@@ -77,18 +77,37 @@ public static class SeedPlanting
         return true;
     }
 
-    // The request the player's own context implies, for the cursor cell.
-    public static PlantRequest RequestFrom(EnvironmentContext ctx, SeedKind seed, int cx, int cy, Vector2 aim)
+    // THE request builder for a planting from a crouch, shared by the channel
+    // (BlockPlaceAction), the seed-crouch gate (PlayerCharacter), the cursor ghost and the
+    // bots, so all four agree. The reach box is PlantRules.CrouchedBounds of the live body:
+    // a standing planter is judged as if already crouched, so the right-click that crouches
+    // them and the channel that follows ask the same question.
+    public static PlantRequest CrouchRequest(SeedKind seed, EntityId owner, Faction faction, int team,
+                                             PhysicsBody body, ChunkMap chunks, int cx, int cy, Vector2 aim)
         => new()
         {
-            Seed     = seed,
-            Owner    = ctx.SelfId,
-            Faction  = ctx.Faction,
-            Team     = ctx.Team,
-            OwnerPos = ctx.Body.Position,
-            OwnerBounds = ctx.Body.Bounds,
-            CellX    = cx,
-            CellY    = cy,
-            Aim      = aim,
+            Seed        = seed,
+            Owner       = owner,
+            Faction     = faction,
+            Team        = team,
+            OwnerPos    = body.Position,
+            OwnerBounds = PlantRules.CrouchedBounds(body.Bounds, chunks),
+            CellX       = cx,
+            CellY       = cy,
+            Aim         = aim,
         };
+
+    // Siege pod aim carrier: cell centre -> cursor.
+    public static Vector2 AimFrom(int cx, int cy, Vector2 cursor)
+        => cursor - new Vector2((cx + 0.5f) * Chunk.TileSize, (cy + 0.5f) * Chunk.TileSize);
+
+    // "Would a crouched planter be allowed to plant here right now?" — PlantRules.Evaluate
+    // on CrouchRequest. The gate, the ghost tint and the channel's per-frame check.
+    public static bool LegalFromCrouch(in PlantRequest req, ChunkMap chunks,
+                                       System.Collections.Generic.IEnumerable<Entity> entities, BuildMeters meters)
+        => chunks != null && PlantRules.Evaluate(in req, chunks, entities, meters, out _) == PlantVerdict.Ok;
+
+    // The request the player's own context implies, for the cursor cell.
+    public static PlantRequest RequestFrom(EnvironmentContext ctx, SeedKind seed, int cx, int cy, Vector2 aim)
+        => CrouchRequest(seed, ctx.SelfId, ctx.Faction, ctx.Team, ctx.Body, ctx.Chunks, cx, cy, aim);
 }

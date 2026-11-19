@@ -133,6 +133,32 @@ public static class PlantRules
     public static BoundingBox BodyBounds(in PlantRequest req)
         => req.OwnerBounds.Width > 0f ? req.OwnerBounds : StandardBody.GetBoundingBox(req.OwnerPos);
 
+    // The box `body` WOULD have once crouched: same width and height, feet set on the floor
+    // under it (the highest solid top within CrouchFloorScanRows below the feet, across the
+    // columns the body spans). A standing body hovers ~15 px above the floor, which reads
+    // out of reach of it; a settled crouch rests on it. With no floor found (airborne over
+    // a drop), the live box. Every planting request the game builds (action, ghost, the
+    // seed-crouch gate, bots) goes through this, so they agree on "legal from a crouch".
+    private const int CrouchFloorScanRows = 3;
+
+    public static BoundingBox CrouchedBounds(BoundingBox body, ChunkMap chunks)
+    {
+        if (chunks == null) return body;
+        const float T = Chunk.TileSize;
+        int x0 = (int)MathF.Floor(body.Left / T);
+        int x1 = (int)MathF.Floor((body.Right - 0.001f) / T);
+        int y0 = (int)MathF.Floor(body.Bottom / T);
+        for (int y = y0; y <= y0 + CrouchFloorScanRows; y++)
+        {
+            float top = y * T;
+            if (top < body.Bottom - 0.5f) continue;   // a row the feet are already below
+            for (int x = x0; x <= x1; x++)
+                if (chunks.GetCellState(x, y) == TileState.Solid)
+                    return new BoundingBox(body.Left, top - body.Height, body.Right, top);
+        }
+        return body;
+    }
+
     public static bool InReach(BoundingBox body, int rx, int ry)
     {
         const float T = Chunk.TileSize;

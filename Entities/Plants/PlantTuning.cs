@@ -56,8 +56,8 @@ public static class PlantTuning
     // beside it or below it, never above its top. One tile.
     public const float PlantReachMargin    = 1f * Chunk.TileSize;
     // Planting is a crouched channel (BlockPlaceAction seed mode): RMB held this many
-    // frames on the seed bar before the plant is made and paid for. 1.5 s at 60 fps.
-    public const int   SeedChannelFrames   = 90;
+    // frames on the seed bar before the plant is made and paid for (36 = 0.6 s at 60 fps).
+    public const int   SeedChannelFrames   = 36;
     // Body half-size (px): a plant fills most of its 11 px cell.
     public const float BodyHalf            = 4.5f;
 

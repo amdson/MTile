@@ -137,7 +137,9 @@ public class CrouchedState : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (!ctx.TryGetCrouchGround(out _)) return false;
-        if (ctx.Input.Down) return true;
+        // Down, or the seed-crouch request (RMB on a plantable spot — an input flag set by
+        // PlayerCharacter, never action state).
+        if (ctx.Input.Down || ctx.SeedCrouch) return true;
         // Auto-crouch: STANDING AT FOLD HOVER doesn't fit here. The fold-era
         // standing envelope is hover offset + body height ≈ 30.8px — lower than
         // the old FSD StandingHeight (32.8, float height + body), which made
@@ -158,7 +160,7 @@ public class CrouchedState : MovementState
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        return (ctx.Input.Down || ctx.TryGetCeiling(out _)) && ctx.TryGetCrouchGround(out _);
+        return (ctx.Input.Down || ctx.SeedCrouch || ctx.TryGetCeiling(out _)) && ctx.TryGetCrouchGround(out _);
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)

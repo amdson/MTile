@@ -279,6 +279,9 @@ public struct PlayerData
     // seed picked on it. Both survive a swap and ride the snapshot like ActiveBlockType.
     public bool     SeedBarActive;
     public SeedKind SelectedSeed;
+    // The seed-crouch latch (PlayerCharacter.SeedCrouchRequested): this RMB hold's cell.
+    public bool     SeedCrouchLatched;
+    public Point    SeedCrouchCell;
 
     // Deep-copy the reference members so a captured/restored PlayerData never shares
     // mutable state with the live player or with another (repeated-restore) copy. Value

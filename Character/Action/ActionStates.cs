@@ -1165,6 +1165,9 @@ public class CrouchSlash : SlashLikeAction
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (!ctx.GroundedForActions) return false;
         if (ctx.PreviousState(0) is not CrouchedState) return false;
+        // A crouch held only by the seed-crouch request (RMB on the seed bar) is not a
+        // crouch-slash stance: LMB there is an ordinary slash.
+        if (ctx.SeedCrouch && !ctx.Input.Down && !ctx.TryGetCeiling(out _)) return false;
         return true;
     }
 
@@ -3311,12 +3314,14 @@ public class BlockPlaceAction : ActionState
     // Shift+RMB places one block per cell — spikes included: Spike is just the selected
     // material, placed as a spike tile on an empty cell touching solid on any face.
     // On the seed bar plain RMB lands here too (seed mode): planting is a CROUCHED CHANNEL.
-    // An RMB press while crouched latches the cursor cell; holding for
-    // PlantTuning.SeedChannelFrames (1.5 s) plants and pays there, once per hold. Anything
-    // that ends the crouch (standing, jumping, falling, dashing), a hit / stun / grab,
-    // releasing, swapping bars, or the site turning illegal (PlantRules.Evaluate, re-asked
-    // every frame — that covers crouch-walking out of reach) cancels it with nothing
-    // planted and nothing spent.
+    // An RMB press on the ground latches the cursor cell if it is legal from a crouch
+    // (SeedPlanting.LegalFromCrouch); the same answer makes PlayerCharacter request the
+    // crouch itself (EnvironmentContext.SeedCrouch), so one right-click crouches. The channel
+    // starts on the first crouched frame of the hold and plants + pays after
+    // PlantTuning.SeedChannelFrames crouched frames, once per hold. Anything that ends the
+    // crouch (standing, jumping, falling, dashing), a hit / stun / grab, releasing, swapping
+    // bars, or the site turning illegal (re-asked every frame — that covers crouch-walking
+    // out of reach) cancels it with nothing planted and nothing spent.
     private static bool Held(EnvironmentContext ctx)
         => ctx.Input.RightClick && (ctx.Input.Shift || ctx.SeedBarActive);
 
@@ -3337,14 +3342,15 @@ public class BlockPlaceAction : ActionState
         vars.OriginCell        = new Vector2(float.NaN, float.NaN);
         vars.SeedMode          = ctx.SeedBarActive;
         vars.SeedArmed         = false;
+        vars.SeedStarted       = false;
         vars.SeedChannelFrames = 0;
         if (!vars.SeedMode) return;
 
         // Seed mode: ONE channel per RMB press. Only a hold that starts on the press edge,
-        // crouched, on a cell that is legal right now starts one; a hold resumed after an
-        // attack preempted it, or begun standing, plants nothing.
+        // on the ground (standing or crouched), on a cell legal from a crouch arms one; a
+        // hold resumed after an attack preempted it, or pressed in the air, plants nothing.
         bool pressEdge = ctx.Controller == null || !ctx.Controller.GetPrevious(1).RightClick;
-        if (!pressEdge || !Crouched(ctx)) return;
+        if (!pressEdge || !OnFeet(ctx)) return;
         var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
         vars.OriginCell = new Vector2(gtx, gty);              // the channel's target cell
         if (!SeedSiteLegal(ctx, ab, in vars)) return;
@@ -3353,6 +3359,7 @@ public class BlockPlaceAction : ActionState
 
     // Actions may read movement: the crouch is the movement FSM's CrouchedState.
     internal static bool Crouched(EnvironmentContext ctx) => ctx.CurrentMovement is CrouchedState;
+    private static bool OnFeet(EnvironmentContext ctx) => ctx.CurrentMovement is StandingState or CrouchedState;
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
@@ -3390,9 +3397,21 @@ public class BlockPlaceAction : ActionState
     private static void UpdateSeedChannel(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         if (!vars.SeedArmed) return;
-        if (!Crouched(ctx) || Interrupted(ctx, in vars) || !SeedSiteLegal(ctx, ab, in vars))
+        if (Interrupted(ctx, in vars) || !SeedSiteLegal(ctx, ab, in vars))
         {
             vars.SeedArmed = false;           // cancelled: nothing planted, nothing spent
+            return;
+        }
+        if (!vars.SeedStarted)
+        {
+            // Armed at the press, waiting for the crouch (the seed-crouch request usually
+            // lands it the same frame). The first crouched frame starts — and counts.
+            if (Crouched(ctx)) vars.SeedStarted = true;
+            else { if (!OnFeet(ctx)) vars.SeedArmed = false; return; }
+        }
+        else if (!Crouched(ctx))
+        {
+            vars.SeedArmed = false;
             return;
         }
         if (++vars.SeedChannelFrames < PlantTuning.SeedChannelFrames) return;
@@ -3409,38 +3428,38 @@ public class BlockPlaceAction : ActionState
         var c = ctx.Combat;
         if (c == null) return false;
         if (c.HitstunActive || c.StunActive || c.GrabbedActive || c.Helpless) return true;
-        // The press frame is CurrentFrame - SeedChannelFrames; any hit registered after it.
+        // The channel's first frame is CurrentFrame - SeedChannelFrames; any hit after it.
         return c.LastHitFrame > ctx.CurrentFrame - vars.SeedChannelFrames;
     }
 
-    // The request this channel would plant: the latched cell, the live body, and (for the
+    // The request this channel would plant: the latched cell, the body as crouched, and (for the
     // siege pod) the aim from the cell centre to the cursor — so the aim follows the cursor
     // while channelling and locks at completion.
     private static PlantRequest SeedRequest(EnvironmentContext ctx, in ActionVars vars)
     {
         int cx = (int)vars.OriginCell.X, cy = (int)vars.OriginCell.Y;
         return SeedPlanting.RequestFrom(ctx, ctx.SelectedSeed, cx, cy,
-                                        ctx.Input.MouseWorldPosition - BlockEruptionHelpers.CellCenter(cx, cy));
+                                        SeedPlanting.AimFrom(cx, cy, ctx.Input.MouseWorldPosition));
     }
 
     private static bool SeedSiteLegal(EnvironmentContext ctx, PlayerAbilityState ab, in ActionVars vars)
     {
         if (ctx.Chunks == null || ctx.Spawner == null) return false;
         var req = SeedRequest(ctx, in vars);
-        return PlantRules.Evaluate(in req, ctx.Chunks, ctx.Spawner.LiveEntities, ab.Meters, out _)
-               == PlantVerdict.Ok;
+        return SeedPlanting.LegalFromCrouch(in req, ctx.Chunks, ctx.Spawner.LiveEntities, ab.Meters);
     }
 
-    // Channel progress 0..1 (render + tests); -1 when no channel is live.
+    // Channel progress 0..1 (render + tests); -1 when no channel is running (incl. armed
+    // but not yet crouched).
     public static float SeedChannelProgress(in ActionVars vars)
-        => vars.SeedMode && vars.SeedArmed
+        => vars.SeedMode && vars.SeedArmed && vars.SeedStarted
             ? MathHelper.Clamp(vars.SeedChannelFrames / (float)PlantTuning.SeedChannelFrames, 0f, 1f)
             : -1f;
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         // Blocks: nothing — the placed tile is the feedback. A live seed channel: a ring at
-        // the target cell filling clockwise from the top over the 1.5 s, so both players can
+        // the target cell filling clockwise from the top over the channel, so both players can
         // read that a seed is going down (the local cursor ghost, Drawing/Plants/PlantGhost.cs,
         // adds the silhouette and the siege pod's aim, which need the terrain and cursor).
         float p = SeedChannelProgress(in vars);

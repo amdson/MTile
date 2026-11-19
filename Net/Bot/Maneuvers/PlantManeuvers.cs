@@ -10,37 +10,38 @@ namespace MTile.Net;
 // The planter's sticky state (the seed bar) is backstopped by SeedBarReturnConstraint.
 
 // Plant one spitter beside or beneath the body, through the raw gesture a human uses: F
-// (to the seed bar), Num1 (spitter), crouch (Down), hold RMB on the cell for the whole
-// channel (PlantTuning.SeedChannelFrames), F (back).
+// (to the seed bar), Num1 (spitter), hold RMB on the cell — the right-click crouches the
+// player itself (the seed crouch) and the channel runs PlantTuning.SeedChannelFrames — F
+// (back).
 //
 // When: grounded and neutral, the opponent at least MinRange away horizontally and not
-// swinging, not hit recently, no live spitter of ours, and PlantRules.Evaluate says Ok for
-// a floor cell the body will reach once crouched (that covers reach, root, occupancy, cap
-// and cost).
+// swinging, not hit recently, no live spitter of ours, and SeedPlanting.LegalFromCrouch says
+// yes for a floor cell (that covers reach from a crouch, root, occupancy, cap and cost) —
+// the same answer the seed-crouch gate and the channel use.
 //
 // Script, one phase per frame at most (sim state is read back each frame, so every step
-// waits for the previous press to land): ToSeedBar -> Select -> Crouch -> Press -> Channel
-// -> Back. The opponent closing in or swinging before the plant sends it straight to Back
-// (RMB released: the channel is cancelled, nothing spent). Back keeps pressing F on
-// alternate frames until the bar reads "block" again; if it times out, or the controller
+// waits for the previous press to land): ToSeedBar -> Select -> Press -> Channel -> Back.
+// The opponent closing in or swinging before the plant sends it straight to Back (RMB
+// released: the channel is cancelled, the crouch ends, nothing spent). Back keeps pressing F
+// on alternate frames until the bar reads "block" again; if it times out, or the controller
 // aborts us (hit, preempted), SeedBarReturnConstraint finishes the job on the following
-// frames. So whatever happens the bot ends on the block bar. Down is held from Crouch
-// through Channel; the claim forbids walking and jumping only.
+// frames. So whatever happens the bot ends on the block bar.
 public sealed class PlantSpitterManeuver : BotManeuver
 {
     public float MinRange      = 12f * Chunk.TileSize;   // opponent horizontal gap to start
     public float AbortRange    = 8f * Chunk.TileSize;    // opponent this close mid-script: give up
     public int   QuietFrames   = 60;                     // frames since we were last hit
-    public int   TimeoutFrames = 40;                     // ToSeedBar..Press must finish by then
+    public int   TimeoutFrames = 30;                     // ToSeedBar..Press must finish by then
     public int   ChannelSlack  = 20;                     // Channel may overrun the channel by this much
     public int   BackFrames    = 20;                     // then Back gets this long before the constraint takes over
     public int   PreferDx      = 1;                      // preferred site: this many cells toward the opponent
 
     public override int       Cooldown => 180;
-    // Plant from a planted body: no walking, no jumping — but Down (the crouch) is ours.
-    public override MoveClaim Move     => MoveClaim.Forbid(MoveKeys.Left | MoveKeys.Right | MoveKeys.Space);
+    // Plant from a planted body: no movement keys at all (the RMB itself crouches us; a
+    // stray Down from elsewhere could slip us off a ledge).
+    public override MoveClaim Move     => MoveClaim.Still;
 
-    private enum Phase { ToSeedBar, Select, Crouch, Press, Channel, Back }
+    private enum Phase { ToSeedBar, Select, Press, Channel, Back }
     private Phase _phase;
     private int   _t, _channelT;
     private Point _cell;
@@ -59,7 +60,7 @@ public sealed class PlantSpitterManeuver : BotManeuver
     public override float Score(BotView v) => Applicable(v) && FindSite(v, out _) ? 0.6f : 0f;
 
     // Low: worth more than idling, well under every ranged/melee attack bet (block throw
-    // 0.6/0.07, crystal wave 0.72/0.2, slash ~0.5/0.1). The horizon covers the channel.
+    // 0.6/0.07, crystal wave 0.72/0.2, slash ~0.5/0.1).
     public override Bet Bet(BotView v) => Score(v) > 0f ? new Bet(0.3f, 0.05f, 120) : Net.Bet.Pass;
 
     private bool Applicable(BotView v)
@@ -76,48 +77,21 @@ public sealed class PlantSpitterManeuver : BotManeuver
     private bool Threat(BotView v)
         => v.Dist < AbortRange || Situation.IsAttack(v.TargetAction);
 
-    private static PlantRequest Request(BotView v, Point cell, BoundingBox body) => new()
+    // Legal from a crouch, standing on a floor (the spitter faces up).
+    private static bool Legal(BotView v, Point cell)
     {
-        Seed        = SeedKind.Spitter,
-        Owner       = v.Self.Id,
-        Faction     = v.Self.Faction,
-        Team        = v.Self.Team,
-        OwnerPos    = v.Me,
-        OwnerBounds = body,
-        CellX       = cell.X,
-        CellY       = cell.Y,
-    };
-
-    private static bool Legal(BotView v, Point cell, BoundingBox body)
-    {
-        var req = Request(v, cell, body);
-        return PlantRules.Evaluate(in req, v.Sim.Chunks, v.Sim.Entities, v.Self.Abilities.Meters, out var site)
+        var s   = v.Self;
+        var req = SeedPlanting.CrouchRequest(SeedKind.Spitter, s.Id, s.Faction, s.Team, s.Body, v.Sim.Chunks,
+                                             cell.X, cell.Y, Vector2.Zero);
+        return PlantRules.Evaluate(in req, v.Sim.Chunks, v.Sim.Entities, s.Abilities.Meters, out var site)
                == PlantVerdict.Ok && site.Root == PlantRoot.Below;
     }
 
-    // The body box once crouched: the live box with its feet set on the floor under us
-    // (a standing body hovers above the floor, out of reach of it; the crouch drops it).
-    private static bool CrouchedBox(BotView v, out BoundingBox box)
-    {
-        box = default;
-        var b  = v.Self.Body.Bounds;
-        var me = BotView.Cell(v.Me);
-        for (int y = me.Y; y <= me.Y + 4; y++)
-        {
-            if (!v.Solid(me.X, y)) continue;
-            float floor = y * Chunk.TileSize;
-            box = new BoundingBox(b.Left, floor - b.Height, b.Right, floor);
-            return true;
-        }
-        return false;
-    }
-
-    // A legal floor-standing cell the crouched body will reach, nearest to PreferDx cells
-    // toward the opponent (in front, where its shots go), then the shallowest. Pure query.
+    // A legal floor-standing cell, nearest to PreferDx cells toward the opponent (in front,
+    // where its shots go), then the shallowest. Pure query.
     private bool FindSite(BotView v, out Point best)
     {
         best = default;
-        if (!CrouchedBox(v, out var box)) return false;
         var me = BotView.Cell(v.Me);
         int bestCost = int.MaxValue;
         for (int dx = -2; dx <= 2; dx++)
@@ -126,15 +100,16 @@ public sealed class PlantSpitterManeuver : BotManeuver
             int cost = Math.Abs(dx - PreferDx * v.Toward) * 4 + Math.Abs(dy);
             if (cost >= bestCost) continue;
             var c = new Point(me.X + dx, me.Y + dy);
-            if (!Legal(v, c, box)) continue;
+            if (!Legal(v, c)) continue;
             best = c; bestCost = cost;
         }
         return bestCost != int.MaxValue;
     }
 
-    private static bool Channelling(BotView v)
-        => v.Self.CurrentAction is BlockPlaceAction
-           && BlockPlaceAction.SeedChannelProgress(v.Self.CurrentActionVars) >= 0f;
+    // The hold still owes its planting (armed, waiting for the crouch or counting).
+    private static bool Armed(BotView v)
+        => v.Self.CurrentAction is BlockPlaceAction && v.Self.CurrentActionVars.SeedMode
+           && v.Self.CurrentActionVars.SeedArmed;
 
     public override void Begin(BotView v)
     {
@@ -151,7 +126,6 @@ public sealed class PlantSpitterManeuver : BotManeuver
         input.RightClick = false;   // we hold Act: only our own press
         if (_phase < Phase.Back && Threat(v)) _phase = Phase.Back;
         if (_phase < Phase.Channel && _t > TimeoutFrames) _phase = Phase.Back;
-        if (_phase == Phase.Crouch || _phase == Phase.Press || _phase == Phase.Channel) input.Down = true;
 
         switch (_phase)
         {
@@ -166,23 +140,13 @@ public sealed class PlantSpitterManeuver : BotManeuver
 
             case Phase.Select:
                 if (v.Self.SelectedSeed != SeedKind.Spitter) { input.Num1 = true; return true; }
-                _phase = Phase.Crouch;
-                goto case Phase.Crouch;
-
-            case Phase.Crouch:
-                // Down until the crouch is up AND has sunk far enough that the site is in
-                // reach (a few frames after CrouchedState enters): the channel only starts
-                // crouched on a legal site. TimeoutFrames bounds the wait.
-                input.Down = true;
-                if (v.Self.CurrentState is not CrouchedState || !Legal(v, _cell, v.Self.Body.Bounds)) return true;
                 _phase = Phase.Press;
                 goto case Phase.Press;
 
             case Phase.Press:
                 if (v.Previous.RightClick) return true;               // need a press edge
-                if (v.Self.CurrentState is not CrouchedState || !Legal(v, _cell, v.Self.Body.Bounds))
-                { _phase = Phase.Back; goto case Phase.Back; }
-                input.RightClick = true;                              // starts the channel
+                if (!Legal(v, _cell)) { _phase = Phase.Back; goto case Phase.Back; }
+                input.RightClick = true;                              // crouches us and arms the channel
                 input.MouseWorldPosition = BotView.CellCenter(_cell);
                 _phase = Phase.Channel;
                 return true;
@@ -194,8 +158,8 @@ public sealed class PlantSpitterManeuver : BotManeuver
                     Planted = true; PlantedFrame = v.Frame; PlantedCell = _cell;
                     _phase = Phase.Back; goto case Phase.Back;
                 }
-                // Cancelled (nothing live to hold for) or overdue: let go and go home.
-                if (!Channelling(v) || _channelT > PlantTuning.SeedChannelFrames + ChannelSlack)
+                // Cancelled (nothing owed any more) or overdue: let go and go home.
+                if (!Armed(v) || _channelT > PlantTuning.SeedChannelFrames + ChannelSlack)
                 { _phase = Phase.Back; goto case Phase.Back; }
                 input.RightClick = true;
                 input.MouseWorldPosition = BotView.CellCenter(_cell);
@@ -204,7 +168,6 @@ public sealed class PlantSpitterManeuver : BotManeuver
             case Phase.Back:
             default:
                 _phase = Phase.Back;
-                input.Down = false;
                 input.RightClick = false;
                 if (!v.Self.SeedBarActive) return false;
                 input.F = !v.Previous.F;
