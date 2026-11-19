@@ -240,6 +240,15 @@ public sealed class CombatSystem
                     }
                 }
 
+                // ── Thorns ── a hit knocks off the thorn-patch spikes it overlaps. Runs
+                // AFTER the block pass above, so on the frame a swing first covers a thorn
+                // and the block it reinforces, the block takes the REDUCED number and the
+                // thorn comes off; any later frame of the same swing (tiles take damage every
+                // overlapping frame) and every later swing cut at full ("strip, then cut").
+                // Thorn cells only: hand-placed spikes keep today's behaviour.
+                if (chunks.Thorns.CellCount > 0 && hit.Damage > 0f)
+                    KnockOffThorns(in hit, chunks, hitVerts, hitAxes, gtx0, gtx1, gty0, gty1);
+
                 if (bestStrike < float.MaxValue)
                 {
                     var into = strikeAt - hit.Origin;
@@ -310,6 +319,28 @@ public sealed class CombatSystem
             if (!_liveHitIds.Contains(k) && !_heldHitIds.Contains(k)) _scratchPrune.Add(k);
         foreach (var k in _scratchPrune) _hitDedupe.Remove(k);
         _heldHitIds.Clear();
+    }
+
+    // ── Thorns ── knock off every thorn-patch spike cell the hitbox overlaps (and, for an
+    // occluded hit, can reach). DamageCell clears a spike on any positive damage.
+    // Removals of different cells commute, so the scan order cannot leak into the sim.
+    private static void KnockOffThorns(in Hitbox hit, ChunkMap chunks, Vector2[] hitVerts, Vector2[] hitAxes,
+                                       int gtx0, int gtx1, int gty0, int gty1)
+    {
+        for (int gtx = gtx0; gtx <= gtx1; gtx++)
+        for (int gty = gty0; gty <= gty1; gty++)
+        {
+            if (!chunks.Thorns.IsThornCell(gtx, gty)) continue;
+            if (hit.Shape != null)
+            {
+                var cellAABB = new BoundingBox(
+                    gtx * Chunk.TileSize,       gty * Chunk.TileSize,
+                    (gtx + 1) * Chunk.TileSize, (gty + 1) * Chunk.TileSize);
+                if (!OverlapsPolyAABB(hitVerts, hitAxes, cellAABB)) continue;
+            }
+            if (hit.Occluded && !TileReach.IsCellReachable(chunks, hit.Origin, gtx, gty)) continue;
+            chunks.DamageCell(gtx, gty, hit.Damage);
+        }
     }
 
     // ── Sensors (Hitbox.Sensor) ─────────────────────────────────────────────────
