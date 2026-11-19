@@ -106,7 +106,7 @@ public class PlantRulesTests
         var sim = Make();
         Run(sim, 0.5f);
         var p = sim.Player;
-        foreach (var k in new[] { SeedKind.Snapper, SeedKind.Thorns, SeedKind.SiegePod, SeedKind.BlockEater })
+        foreach (var k in new[] { SeedKind.Thorns, SeedKind.SiegePod, SeedKind.BlockEater })
         {
             Assert.Equal(PlantVerdict.NotImplemented,
                 PlantRules.Evaluate(Request(p, 6, Row, k), sim.Chunks, sim.Entities, null, out _));
