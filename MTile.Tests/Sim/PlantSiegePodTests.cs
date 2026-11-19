@@ -174,12 +174,13 @@ public class PlantSiegePodTests(ITestOutputHelper output)
     public void Burial_FreezesGrowth_AndDelaysTheShot()
     {
         var (sim, pod) = Planted(10, Vector2.Zero);
-        Run(sim, 5f);
+        float pre = PlantTuning.SiegePodGrowSeconds * 0.25f;
+        Run(sim, pre);
         sim.Chunks.EditorSetCell(10, Row, TileState.Solid, TileType.Foam);
         Run(sim, 2f);
         Assert.True(pod.Dormant);
         sim.Chunks.EditorSetCell(10, Row, TileState.Empty, TileType.Foam);
-        Run(sim, PlantTuning.SiegePodGrowSeconds - 7f + 0.1f);   // 20.1 s since planting, 18.1 s grown
+        Run(sim, PlantTuning.SiegePodGrowSeconds - pre - 2f + 0.1f);   // past ripening by the clock, 1.9 s short by growth
         Assert.False(pod.HasFired, "two buried seconds must not count toward ripening");
         Assert.True(Solid(sim, 10, FloorRow));
         Run(sim, 2.1f);
@@ -192,7 +193,7 @@ public class PlantSiegePodTests(ITestOutputHelper output)
     public void KilledEarly_NoShot_TerrainUntouched(bool breakRoot)
     {
         var (sim, pod) = Planted(10, Right);
-        Run(sim, 10f);
+        Run(sim, PlantTuning.SiegePodGrowSeconds * 0.5f);
         if (breakRoot) sim.Chunks.EditorSetCell(10, FloorRow, TileState.Empty, TileType.Dirt);
         else           pod.Health = 0f;
         ulong before = TerrainHash(sim.Chunks);
@@ -282,10 +283,9 @@ public class PlantSiegePodTests(ITestOutputHelper output)
         });
         // Keep both players out of every spitter's range (nothing shoots the pod down).
         sim.Player.Body.Position = Spawn(60);
-        Run2(sim, PlantTuning.SpitterGrowSeconds + 0.5f);
-        Assert.True(spitter.IsMature);
-        Assert.True(spitter.Health > SiegeBlast.BlastBodyDamage && spitter.Health > SiegeBlast.LanceBodyDamage,
-                    "a mature spitter outlasts one heavy hit — the kill must come from the plant rule");
+        // (Since the 2026-11-19 retune — 6 s growth, doubled damage — the pod fires before a
+        // spitter can mature and its hit out-damages any plant, so the hit alone is lethal
+        // too; the hazard rule in PlantEntity.OnHit is still what guarantees it.)
         Assert.True(StepUntilFired(sim, pod, two: true) > 0);
         Assert.True(spitter.IsDead, $"spitter health {spitter.Health}");   // on the fire frame itself
         Assert.True(Solid(sim, sx, FloorRow), "its root still stands");
@@ -343,10 +343,10 @@ public class PlantSiegePodTests(ITestOutputHelper output)
     {
         var (sim, pod) = Planted(10, Right, g => g.AddSecondaryPlayer(Spawn(30)));
         if (frameBeforeFiring) { while (!pod.IsMature) sim.Step(default, default); Assert.False(pod.HasFired); }
-        else Run2(sim, 9f);
+        else Run2(sim, PlantTuning.SiegePodGrowSeconds * 0.45f);
 
         var snap = sim.Snapshot();
-        Run2(sim, frameBeforeFiring ? 3f : 14f);
+        Run2(sim, frameBeforeFiring ? 3f : PlantTuning.SiegePodGrowSeconds);
         ulong a = sim.Checksum(), ta = TerrainHash(sim.Chunks);
         float hp = sim.SecondaryPlayers[0].Player.Health;
         Assert.DoesNotContain(sim.Entities, e => e is SiegePodPlant);
@@ -355,7 +355,7 @@ public class PlantSiegePodTests(ITestOutputHelper output)
         var back = Assert.IsType<SiegePodPlant>(Plants(sim).Single());
         Assert.Equal(Right.X, back.Aim.X, 5);
         Assert.False(back.HasFired);
-        Run2(sim, frameBeforeFiring ? 3f : 14f);
+        Run2(sim, frameBeforeFiring ? 3f : PlantTuning.SiegePodGrowSeconds);
         Assert.Equal(a, sim.Checksum());
         Assert.Equal(ta, TerrainHash(sim.Chunks));
         Assert.Equal(hp, sim.SecondaryPlayers[0].Player.Health);

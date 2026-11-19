@@ -113,7 +113,7 @@ public static class PlantTuning
     public const float SnapperHeadOffset     = 6f;                // px from cell centre, away from the root
 
     // ── Siege pod (§4.4; the shot itself is tuned in SiegeBlast) ────────────
-    public const float SiegePodGrowSeconds   = 20f;               // growth = telegraph; fires on ripening
+    public const float SiegePodGrowSeconds   = 6f;                // growth = telegraph; fires on ripening
     public const float SiegePodChargeSeconds = 1.5f;              // last stretch of growth: the urgent tell
     public const float SiegePodHealth        = 1.5f;              // mature pool; it fires on maturing, so in
                                                                   // practice it lives on SeedlingHealth

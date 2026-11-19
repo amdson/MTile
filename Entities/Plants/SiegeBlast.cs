@@ -92,13 +92,13 @@ public static class SiegeBlast
     public const float LanceCostDefault  = 1f;      // any material not listed above
 
     // Body hit along the lance (heavy tier: beats a held guard, launches).
-    public const float LanceBodyDamage = 0.8f;
+    public const float LanceBodyDamage = 1.6f;
     public const float LanceKnockback  = 1000f;    // impulse; player mass 2.5 → 400 px/s before KnockbackSpeedScale
 
     // ── Blast ────────────────────────────────────────────────────────────────
     public const float BlastRadius     = 55f;      // RayEmitter's end-of-life disc
-    public const float BlastTileDamage = 2.5f;     // > dirt (2.0) and sand: clears them; chips stone (12)
-    public const float BlastBodyDamage = 0.9f;     // top of the heavy band
+    public const float BlastTileDamage = 5.0f;     // > dirt (2.0) and sand: clears them; chips stone (12)
+    public const float BlastBodyDamage = 1.8f;     // top of the heavy band
     public const float BlastKnockback  = 1200f;    // impulse, radially outward
     public const int   BlastWedges     = 12;       // the disc's body shape: 12 pie slices
 

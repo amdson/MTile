@@ -249,7 +249,7 @@ public class BotManeuverPlantTests(ITestOutputHelper output)
     [Fact]
     public void Siege_EarlyInGrowth_DoesNothing()
     {
-        var (d, pod) = WithPod(BotCol - 2, 5f);
+        var (d, pod) = WithPod(BotCol - 2, PlantTuning.SiegePodGrowSeconds * 0.3f);
         var v = View(d.Sim, d.P2, d.P1, 999);
         Assert.False(new SiegeDodgeManeuver().Bet(v).Applicable);
         for (int f = 0; f < 90; f++) d.Step();
