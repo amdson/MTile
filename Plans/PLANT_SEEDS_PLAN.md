@@ -174,7 +174,7 @@ end of life. The pod is that shape with different numbers:
 - **Not team-filtered.** Blast and lance both hit the owner, the owner's plants and the owner's
   blocks. Planting one in the middle of your own garden costs you the garden.
 - Killing the seed early removes it with no blast (RayEmitter's rule).
-- Start: growth 20 s; one siege pod alive per player.
+- Growth 6 s (retuned from 20 s on 2026-11-19, with body damage doubled); one siege pod alive per player.
 
 ### 4.5 Block-eater
 Planted on a block owned by the *other* player (`World/BlockOwnership.cs`). Spreads cell to cell
