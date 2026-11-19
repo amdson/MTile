@@ -1,0 +1,29 @@
+{
+  "//": "Garden: the 'adventure' terrain (WorldGen values identical) closed by Hardened walls beyond +-BoundaryHalfWidth tiles. [adventure doc follows]  Same WorldGenerator as spires.json with the spiky-hill and spire channels switched off (amplitude 0), leaving only the rolling base: low dirt hills a few tiles high over a ~100-tile wavelength. Materials: no sand, a flat 10 tiles of dirt, then solid stone — the pocket levels are set above anything the pocket noise reaches, so the stone has no dirt/sand inclusions. Not hot-reloaded (a mid-match change would desync rollback peers).",
+  "WorldGen": {
+    "Seed": 2024,
+    "GroundLevel": 0,
+
+    "BaseScale": 0.012,
+    "BaseOctaves": 3,
+    "BaseAmplitude": 9,
+
+    "HillAmplitude": 0,
+    "SpireAmplitude": 0,
+    "MaxHeight": 64,
+
+    "SandMin": 0,
+    "SandRange": 0,
+    "DirtMin": 10,
+    "DirtRange": 0,
+
+    "DirtPocketLevel": 9,
+    "SandPocketLevel": 9,
+
+    "BoundaryHalfWidth": 90,
+    "BoundaryHeadroom": 200,
+
+    "StreamRadiusX": 8,
+    "StreamRadiusY": 6
+  }
+}

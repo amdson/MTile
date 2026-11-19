@@ -405,6 +405,17 @@ public static partial class Stages
             PlayerSpawn   = new Vector2(0f, 0f),
             Populate      = _ => { },
         });
+
+        // garden: the adventure terrain closed by Hardened walls at +-90 tiles
+        // (Plans/PLANT_SEEDS_PLAN.md 8a), a bounded duel arena for plants.
+        Register(new Stage {
+            Name          = "garden",
+            TerrainConfig = "garden.json",
+            PlayerSpawn   = new Vector2(-300f, 0f),
+            SecondSpawn   = new Vector2(300f, 0f),
+            Versus        = true,
+            Populate      = _ => { },
+        });
     }
 
     public static void Register(Stage s) => _registry[s.Name] = s;
