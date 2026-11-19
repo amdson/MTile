@@ -16,29 +16,35 @@ public static class PlantGhost
         if (player == null || chunks == null || !player.SeedBarActive) return;
         int cx = (int)System.MathF.Floor(cursorWorld.X / Chunk.TileSize);
         int cy = (int)System.MathF.Floor(cursorWorld.Y / Chunk.TileSize);
-        // A release-commit seed being aimed (the siege pod, §3): the ghost stays on the press
-        // cell and the drag from the press point is the aim — exactly what the release plants.
-        var drag = Vector2.Zero;
-        bool aiming = player.CurrentAction is BlockPlaceAction && player.CurrentActionVars.SeedMode
-                      && player.CurrentActionVars.SeedArmed && SeedPlanting.CommitsOnRelease(player.SelectedSeed);
+        // A live planting channel (BlockPlaceAction seed mode): the ghost stays on the
+        // channel's cell and, for the siege pod, aims from that cell to the cursor — exactly
+        // what completion plants.
+        bool aiming = player.CurrentAction is BlockPlaceAction
+                      && BlockPlaceAction.SeedChannelProgress(player.CurrentActionVars) >= 0f;
         if (aiming)
         {
             var v = player.CurrentActionVars;
             cx = (int)v.OriginCell.X;
             cy = (int)v.OriginCell.Y;
-            drag = cursorWorld - v.BallPos;
         }
+        // Out in open air the ghost is just noise: draw nothing unless the cursor is near
+        // ground. A live channel keeps its own site ghost wherever the cursor wanders.
+        else if (!NearGround(chunks, cx, cy)) return;
+        var drag = cursorWorld - new Vector2((cx + 0.5f) * Chunk.TileSize, (cy + 0.5f) * Chunk.TileSize);
         var req = new PlantRequest
         {
             Seed = player.SelectedSeed, Owner = player.Id, Faction = player.Faction, Team = player.Team,
-            OwnerPos = player.Body.Position, CellX = cx, CellY = cy, Aim = drag,
+            OwnerPos = player.Body.Position, OwnerBounds = player.Body.Bounds, CellX = cx, CellY = cy, Aim = drag,
         };
         var verdict = PlantRules.Evaluate(in req, chunks, entities, player.Abilities.Meters, out var site);
-        bool ok = verdict == PlantVerdict.Ok;
+        // Planting needs a crouch (the channel only starts crouched), so standing shows red.
+        bool ok = verdict == PlantVerdict.Ok && player.CurrentState is CrouchedState;
         var center = new Vector2((cx + 0.5f) * Chunk.TileSize, (cy + 0.5f) * Chunk.TileSize);
         // Oriented onto whatever root the cell has even when another rule rejects it (out
         // of reach, capped); a cell with no root at all is shown upright.
-        bool rooted = PlantRules.TryFindSite(req.Seed, chunks, cx, cy, out var any);
+        // A legal site uses the face planting would actually pick (the in-reach one).
+        var any = site;
+        bool rooted = verdict == PlantVerdict.Ok || PlantRules.TryFindSite(req.Seed, chunks, cx, cy, out any);
         float rot = rooted ? PlantRules.RotationOf(any.Root) : 0f;
         var tint = (ok ? PlantPalette.Legal : PlantPalette.Illegal) * (ok ? 0.55f : 0.4f);
 
@@ -72,6 +78,18 @@ public static class PlantGhost
             t.Line(center + new Vector2(-h * 0.6f, -h * 0.6f), center + new Vector2(h * 0.6f, h * 0.6f), edge, 1f);
             t.Line(center + new Vector2(h * 0.6f, -h * 0.6f), center + new Vector2(-h * 0.6f, h * 0.6f), edge, 1f);
         }
+    }
+
+    // The ghost shows only when the cursor's cell is solid or has a solid cell within this
+    // many tiles (Chebyshev) of it.
+    public const int GroundProximityTiles = 1;
+
+    private static bool NearGround(ChunkMap chunks, int cx, int cy)
+    {
+        for (int dy = -GroundProximityTiles; dy <= GroundProximityTiles; dy++)
+        for (int dx = -GroundProximityTiles; dx <= GroundProximityTiles; dx++)
+            if (chunks.GetCellState(cx + dx, cy + dy) == TileState.Solid) return true;
+        return false;
     }
 
     // Each seed's ghost silhouette. One line per kind — M3-M6 swap in their figure's.

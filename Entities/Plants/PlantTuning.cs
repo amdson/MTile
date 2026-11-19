@@ -51,8 +51,13 @@ public static class PlantTuning
     public const float SeedlingHealth      = 0.5f;
     // Health fraction below which an awake plant shows its Wilt pose.
     public const float WiltFraction        = 0.3f;
-    // Planting reach from the player centre (px): the block build reach.
-    public const float PlantReach          = BlockPaintAction.BuildReach;
+    // Planting reach (PlantRules.InReach): the block a plant ROOTS in (the block-eater: the
+    // target block) must lie within this margin of the planter's body bounding box —
+    // beside it or below it, never above its top. One tile.
+    public const float PlantReachMargin    = 1f * Chunk.TileSize;
+    // Planting is a crouched channel (BlockPlaceAction seed mode): RMB held this many
+    // frames on the seed bar before the plant is made and paid for. 1.5 s at 60 fps.
+    public const int   SeedChannelFrames   = 90;
     // Body half-size (px): a plant fills most of its 11 px cell.
     public const float BodyHalf            = 4.5f;
 

@@ -3307,8 +3307,13 @@ public class BlockPlaceAction : ActionState
 
     // Shift+RMB places one block per cell — spikes included: Spike is just the selected
     // material, placed as a spike tile on an empty cell touching solid on any face.
-    // On the seed bar plain RMB lands here too (seed mode): a paint stroke of capped
-    // plants means nothing, so both gestures plant one seed per press.
+    // On the seed bar plain RMB lands here too (seed mode): planting is a CROUCHED CHANNEL.
+    // An RMB press while crouched latches the cursor cell; holding for
+    // PlantTuning.SeedChannelFrames (1.5 s) plants and pays there, once per hold. Anything
+    // that ends the crouch (standing, jumping, falling, dashing), a hit / stun / grab,
+    // releasing, swapping bars, or the site turning illegal (PlantRules.Evaluate, re-asked
+    // every frame — that covers crouch-walking out of reach) cancels it with nothing
+    // planted and nothing spent.
     private static bool Held(EnvironmentContext ctx)
         => ctx.Input.RightClick && (ctx.Input.Shift || ctx.SeedBarActive);
 
@@ -3326,27 +3331,30 @@ public class BlockPlaceAction : ActionState
     {
         vars.TimeInState = 0f;
         // Sentinel so the press frame itself places: no cell has been placed yet.
-        vars.OriginCell = new Vector2(float.NaN, float.NaN);
-        vars.SeedMode   = ctx.SeedBarActive;
-        vars.SeedArmed  = false;
+        vars.OriginCell        = new Vector2(float.NaN, float.NaN);
+        vars.SeedMode          = ctx.SeedBarActive;
+        vars.SeedArmed         = false;
+        vars.SeedChannelFrames = 0;
         if (!vars.SeedMode) return;
 
-        // Seed mode: ONE planting per RMB press. Only a hold that starts on the press edge
-        // is armed, so a hold resumed after an attack preempted it plants nothing.
+        // Seed mode: ONE channel per RMB press. Only a hold that starts on the press edge,
+        // crouched, on a cell that is legal right now starts one; a hold resumed after an
+        // attack preempted it, or begun standing, plants nothing.
         bool pressEdge = ctx.Controller == null || !ctx.Controller.GetPrevious(1).RightClick;
-        if (!pressEdge) return;
+        if (!pressEdge || !Crouched(ctx)) return;
         var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
-        vars.OriginCell = new Vector2(gtx, gty);              // the press cell (cell indices)
-        vars.BallPos    = ctx.Input.MouseWorldPosition;       // the press point (drag origin)
+        vars.OriginCell = new Vector2(gtx, gty);              // the channel's target cell
+        if (!SeedSiteLegal(ctx, ab, in vars)) return;
         vars.SeedArmed  = true;
-        if (SeedPlanting.CommitsOnRelease(ctx.SelectedSeed)) return;   // planted in Exit
-        PlantSeed(ctx, ab, ref vars, Vector2.Zero);
     }
+
+    // Actions may read movement: the crouch is the movement FSM's CrouchedState.
+    internal static bool Crouched(EnvironmentContext ctx) => ctx.CurrentMovement is CrouchedState;
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState += ctx.Dt;
-        if (vars.SeedMode) return;   // seeds act on the press (Enter) or release (Exit)
+        if (vars.SeedMode) { UpdateSeedChannel(ctx, ab, ref vars); return; }
 
         var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
         var cell = BlockEruptionHelpers.CellCenter(gtx, gty);
@@ -3369,31 +3377,78 @@ public class BlockPlaceAction : ActionState
         vars.OriginCell = cell;
     }
 
-    // A release-commit seed (the siege pod) plants on a natural release — RMB up — at the
-    // press cell, aimed by the press → release drag. A preempt (RMB still held) or a bar
-    // swap forfeits it.
+    // Leaving the action (release, bar swap, preempt) mid-channel forfeits it: nothing is
+    // planted or spent before completion, so there is nothing to undo.
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        if (!vars.SeedMode || !vars.SeedArmed) return;
-        if (ctx.Input.RightClick) return;
-        if (!SeedPlanting.CommitsOnRelease(ctx.SelectedSeed)) return;
-        PlantSeed(ctx, ab, ref vars, ctx.Input.MouseWorldPosition - vars.BallPos);
-    }
+        => vars.SeedArmed = false;
 
-    private static void PlantSeed(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars, Vector2 aim)
+    // One channel frame. Runs after this frame's movement selection, so a crouch that ended
+    // this frame (stood, jumped, fell, dashed) is already visible.
+    private static void UpdateSeedChannel(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
+        if (!vars.SeedArmed) return;
+        if (!Crouched(ctx) || Interrupted(ctx, in vars) || !SeedSiteLegal(ctx, ab, in vars))
+        {
+            vars.SeedArmed = false;           // cancelled: nothing planted, nothing spent
+            return;
+        }
+        if (++vars.SeedChannelFrames < PlantTuning.SeedChannelFrames) return;
+
+        // Complete: plant through the one entry point, which re-asks PlantRules.Evaluate.
         vars.SeedArmed = false;
-        var req = SeedPlanting.RequestFrom(ctx, ctx.SelectedSeed,
-                                           (int)vars.OriginCell.X, (int)vars.OriginCell.Y, aim);
+        var req = SeedRequest(ctx, in vars);
         SeedPlanting.TryPlant(in req, ab.Meters, ctx.Chunks, ctx.Spawner);
     }
 
+    // Hit, stunned, launched or grabbed since the channel began.
+    private static bool Interrupted(EnvironmentContext ctx, in ActionVars vars)
+    {
+        var c = ctx.Combat;
+        if (c == null) return false;
+        if (c.HitstunActive || c.StunActive || c.GrabbedActive || c.Helpless) return true;
+        // The press frame is CurrentFrame - SeedChannelFrames; any hit registered after it.
+        return c.LastHitFrame > ctx.CurrentFrame - vars.SeedChannelFrames;
+    }
+
+    // The request this channel would plant: the latched cell, the live body, and (for the
+    // siege pod) the aim from the cell centre to the cursor — so the aim follows the cursor
+    // while channelling and locks at completion.
+    private static PlantRequest SeedRequest(EnvironmentContext ctx, in ActionVars vars)
+    {
+        int cx = (int)vars.OriginCell.X, cy = (int)vars.OriginCell.Y;
+        return SeedPlanting.RequestFrom(ctx, ctx.SelectedSeed, cx, cy,
+                                        ctx.Input.MouseWorldPosition - BlockEruptionHelpers.CellCenter(cx, cy));
+    }
+
+    private static bool SeedSiteLegal(EnvironmentContext ctx, PlayerAbilityState ab, in ActionVars vars)
+    {
+        if (ctx.Chunks == null || ctx.Spawner == null) return false;
+        var req = SeedRequest(ctx, in vars);
+        return PlantRules.Evaluate(in req, ctx.Chunks, ctx.Spawner.LiveEntities, ab.Meters, out _)
+               == PlantVerdict.Ok;
+    }
+
+    // Channel progress 0..1 (render + tests); -1 when no channel is live.
+    public static float SeedChannelProgress(in ActionVars vars)
+        => vars.SeedMode && vars.SeedArmed
+            ? MathHelper.Clamp(vars.SeedChannelFrames / (float)PlantTuning.SeedChannelFrames, 0f, 1f)
+            : -1f;
+
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
-        // Nothing to show here. Blocks: the placed tile is the feedback. A release-commit seed
-        // being aimed (the siege pod): the cursor ghost (Drawing/Plants/PlantGhost.cs) draws the
-        // pod on the press cell and its real aim line — it has the terrain and the cursor this
-        // hook lacks.
+        // Blocks: nothing — the placed tile is the feedback. A live seed channel: a ring at
+        // the target cell filling clockwise from the top over the 1.5 s, so both players can
+        // read that a seed is going down (the local cursor ghost, Drawing/Plants/PlantGhost.cs,
+        // adds the silhouette and the siege pod's aim, which need the terrain and cursor).
+        float p = SeedChannelProgress(in vars);
+        if (p < 0f) return;
+        var c = BlockEruptionHelpers.CellCenter((int)vars.OriginCell.X, (int)vars.OriginCell.Y);
+        float r = Chunk.TileSize * 0.95f;
+        t.Ring(c, r, new Color(140, 220, 120) * 0.3f, 20, 1f);
+        if (p <= 0f) return;
+        float half = MathHelper.Pi * p;   // a 2π·p sweep starting straight up
+        t.Arc(c, r, -MathHelper.PiOver2 + half, half, new Color(170, 255, 140) * 0.9f,
+              System.Math.Max(2, (int)(24f * p)), 2f);
     }
 }
 

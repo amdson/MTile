@@ -22,17 +22,19 @@ public readonly struct PlantSite
 public enum PlantVerdict { Ok, NotImplemented, OutOfReach, NoRoot, Occupied, CapReached, CantAfford }
 
 // Everything a planting request carries. Built by BlockPlaceAction (seed mode) from the
-// player's EnvironmentContext; tests build it by hand. Aim is press → release (world px),
-// captured for every seed even though only the siege pod reads it.
+// player's EnvironmentContext; tests build it by hand. Aim (world px) is only read by the
+// siege pod: the vector from the pod's cell centre to the cursor.
 public struct PlantRequest
 {
     public SeedKind Seed;
     public EntityId Owner;      // the planting player's World id
     public Faction  Faction;    // the owner's faction — the plant's hurtbox and hitboxes carry it
     public int      Team;       // the owner's team (spike rule)
-    public Vector2  OwnerPos;   // for the reach check
+    public Vector2  OwnerPos;   // the planter's body centre (reach falls back to this)
+    public BoundingBox OwnerBounds; // the planter's body box, for the reach check (default:
+                                // the standing player polygon at OwnerPos — PlantRules.BodyBounds)
     public int      CellX, CellY;
-    public Vector2  Aim;        // press → release drag vector (zero for press-commit seeds)
+    public Vector2  Aim;        // siege pod: cell centre → cursor (zero elsewhere)
 }
 
 // The planting rules as pure statics, shared by SeedPlanting.TryPlant, the cursor ghost
@@ -116,10 +118,47 @@ public static class PlantRules
         return chunks.GetCellState(rc.X, rc.Y) == TileState.Solid;
     }
 
-    public static bool InReach(Vector2 ownerPos, int cx, int cy)
+    // ── Reach ───────────────────────────────────────────────────────────────
+    // Planting is close work: the block the plant ROOTS in (the block-eater: the target
+    // block itself) must be beside or beneath the planter's body. Concretely the root cell
+    // must overlap the body's bounding box grown by PlantReachMargin to the left, right and
+    // below — not above — and its centre must not be above the top of the body (no
+    // ceilings, nothing higher than the head). Ceiling roots (PlantRoot.Above) are refused
+    // outright for the same reason.
+
+    // The planter's body box. A request built from a live context carries it; a hand-built
+    // one (tests, bots) may leave it default and get the standing player polygon at OwnerPos.
+    private static readonly Polygon StandardBody = PlayerCharacter.CreateBodyPolygon();
+
+    public static BoundingBox BodyBounds(in PlantRequest req)
+        => req.OwnerBounds.Width > 0f ? req.OwnerBounds : StandardBody.GetBoundingBox(req.OwnerPos);
+
+    public static bool InReach(BoundingBox body, int rx, int ry)
     {
-        var c = new Vector2((cx + 0.5f) * Chunk.TileSize, (cy + 0.5f) * Chunk.TileSize);
-        return Vector2.DistanceSquared(ownerPos, c) <= PlantTuning.PlantReach * PlantTuning.PlantReach;
+        const float T = Chunk.TileSize;
+        float m = PlantTuning.PlantReachMargin;
+        float l = rx * T, r = l + T, t = ry * T;
+        if (!(r > body.Left - m && l < body.Right + m)) return false;   // beside, within the margin
+        if (t + 0.5f * T < body.Top) return false;                      // never above the head
+        return t < body.Bottom + m;                                     // down to the margin below
+    }
+
+    // TryDirtSite restricted to roots in reach of `body`: the first face in RootOrder whose
+    // root is dirt AND in reach, ceilings excluded. Picks the floor under/beside the
+    // planter, else a wall face beside them.
+    public static bool TryDirtSiteInReach(ChunkMap chunks, int cx, int cy, BoundingBox body, out PlantSite site)
+    {
+        site = default;
+        if (chunks == null || !CellOpen(chunks, cx, cy)) return false;
+        foreach (var r in RootOrder)
+        {
+            if (r == PlantRoot.Above) continue;
+            var rc = RootCell(cx, cy, r);
+            if (!IsDirtRoot(chunks, rc.X, rc.Y) || !InReach(body, rc.X, rc.Y)) continue;
+            site = new PlantSite(cx, cy, r);
+            return true;
+        }
+        return false;
     }
 
     // A live plant already stands in this cell.
@@ -171,9 +210,10 @@ public static class PlantRules
     {
         site = default;
         if (!SeedPlanting.IsImplemented(req.Seed))            return PlantVerdict.NotImplemented;
-        if (!InReach(req.OwnerPos, req.CellX, req.CellY))     return PlantVerdict.OutOfReach;
+        var body = BodyBounds(in req);
         if (req.Seed == SeedKind.BlockEater)
         {
+            if (!InReach(body, req.CellX, req.CellY))         return PlantVerdict.OutOfReach;
             // The one seed that roots ON a block: a solid cell owned by another player, any
             // material (§4.5). Its own cap (one live patch per player) is inside CanPlant.
             site = new PlantSite(req.CellX, req.CellY, PlantRoot.Below);
@@ -183,7 +223,11 @@ public static class PlantRules
                 return PlantVerdict.CantAfford;
             return PlantVerdict.Ok;
         }
-        if (!TryFindSite(req.Seed, chunks, req.CellX, req.CellY, out site)) return PlantVerdict.NoRoot;
+        // Every other seed roots by the dirt rule, on a root in reach. A cell that has a dirt
+        // root, just none the planter can reach, reports OutOfReach (the ghost's red).
+        if (!TryDirtSiteInReach(chunks, req.CellX, req.CellY, body, out site))
+            return TryFindSite(req.Seed, chunks, req.CellX, req.CellY, out _) ? PlantVerdict.OutOfReach
+                                                                                : PlantVerdict.NoRoot;
         if (Occupied(entities, req.CellX, req.CellY))         return PlantVerdict.Occupied;
         // Thorns are tile state, capped by ThornPatches (patches and cells per team, §4.3).
         if (req.Seed == SeedKind.Thorns && !chunks.CanPlantThornPatch(req.CellX, req.CellY, (byte)req.Team))
