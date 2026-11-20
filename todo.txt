@@ -1,7 +1,11 @@
 1. improve movement feel. 
 - fix issue with overly long time horizon on lattice planning, esp when jumping up (deferred)
 - add a specific animation for wall jumping while controls are holding player into wall 
+- fix ledge pull into tunnel
 
+
+- fix missing arm while hanging
+- fix mass ball hitbox (does it even have one?)
 
 
 - lower the time between aerial slashes, but keep the end lag if the combo ends. same for ground slashes

@@ -93,6 +93,10 @@ else if (_phase == Phase.Playing && _bootDone && _peerInterrupted && !_peerLost)
                             }
                         </select>
                     </p>
+                    <p class="mtile-botrow">
+                        <label for="mtile-sharp">Sharp rendering (high-DPI screens; turn off if it runs slowly):</label>
+                        <input id="mtile-sharp" type="checkbox" checked="@_sharp" @onchange="OnSharpChanged" />
+                    </p>
                     <div class="mtile-row">
                         <button class="mtile-btn" @onclick="StartSolo">Solo</button>
                         @if (_signalReady)

@@ -48,6 +48,12 @@ public sealed class BackWallRenderer
     private readonly Texture2D   _pixel;
     // Optional grain atlas shared with ChunkRenderer; null → flat fills.
     public TileTextureAtlas Atlas;
+    // The ink tile look rounds convex corners, which leaves a small notch of each such
+    // tile open. When set, a wall cell also paints a thin strip under each solid
+    // neighbour, so a notch underground shows wall and not the sky backdrop. The strips
+    // are otherwise hidden by the tile fills drawn after this.
+    public bool FillNotches;
+    private const int NotchPx = (Chunk.TileSize * TerrainInk.CornerWash + TerrainInk.WashTexels - 1) / TerrainInk.WashTexels;
 
     private readonly GroundLine _ground = new();
     // Wall cells found by the fill pass (cell + opacity), reused by the shadow pass so
@@ -108,6 +114,15 @@ public sealed class BackWallRenderer
                 else
                     _spriteBatch.Draw(_pixel, dest, color);
                 _wallCells.Add((gtx, gty, a));
+                if (FillNotches)
+                {
+                    const int N = NotchPx;
+                    int left = gtx * T, top = gty * T;
+                    if (light.KindAt(gtx, gty + 1) == TerrainLightField.Solid) _spriteBatch.Draw(_pixel, new Rectangle(left, top + T, T, N), color);
+                    if (light.KindAt(gtx, gty - 1) == TerrainLightField.Solid) _spriteBatch.Draw(_pixel, new Rectangle(left, top - N, T, N), color);
+                    if (light.KindAt(gtx + 1, gty) == TerrainLightField.Solid) _spriteBatch.Draw(_pixel, new Rectangle(left + T, top, N, T), color);
+                    if (light.KindAt(gtx - 1, gty) == TerrainLightField.Solid) _spriteBatch.Draw(_pixel, new Rectangle(left - N, top, N, T), color);
+                }
             }
 
         // Pass 2: inner shadow where the wall meets terrain that is still standing, so a

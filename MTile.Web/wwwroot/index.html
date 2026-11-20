@@ -58,10 +58,27 @@
         // TickDotNet returns false (or throws) when the game loop has stopped — either an
         // unhandled exception surfaced into the lobby's Failed screen, or the page is done.
         // Either way, stop re-queueing so we don't spin an rAF loop against a dead game.
+        // "Sharp rendering": back the canvas with physical pixels instead of CSS pixels, so
+        // a high-DPI screen is not shown a stretched frame. The canvas keeps its CSS size
+        // (set in initRenderJS); only its backing store grows. Re-checked every frame
+        // because KNI resets the canvas to window.innerWidth/Height on each resize. Capped
+        // at 2x: a 3x phone would quadruple-plus the fill cost for little visible gain.
+        // The game is told the CSS size and the scale so it can keep framing, HUD size and
+        // mouse mapping unchanged (Game1.SyncHighDpi).
         function tickJS() {
             var alive = false;
             try {
-                alive = window.theInstance.invokeMethod('TickDotNet');
+                var w = window.innerWidth, h = window.innerHeight, scale = 1;
+                if (window.mtileSharp) {
+                    scale = Math.min(window.devicePixelRatio || 1, 2);
+                    var canvas = document.getElementById('theCanvas');
+                    var pw = Math.round(w * scale), ph = Math.round(h * scale);
+                    if (canvas.width !== pw || canvas.height !== ph) {
+                        canvas.width = pw;
+                        canvas.height = ph;
+                    }
+                }
+                alive = window.theInstance.invokeMethod('TickDotNet', w, h, scale);
             } catch (e) {
                 console.error('MTile: game loop stopped', e);
                 alive = false;
@@ -86,13 +103,28 @@
             document.body.removeChild(ta);
         };
 
-        window.initRenderJS = (instance) => {
+        // Lobby setting, remembered per browser. Absent = on.
+        window.mtileGetSharp = () => {
+            try { return localStorage.getItem('mtileSharp') !== '0'; } catch (e) { return true; }
+        };
+        window.mtileSetSharp = (on) => {
+            try { localStorage.setItem('mtileSharp', on ? '1' : '0'); } catch (e) { }
+        };
+
+        window.initRenderJS = (instance, sharp) => {
             window.theInstance = instance;
+            window.mtileSharp = !!sharp;
 
             var canvas = document.getElementById('theCanvas');
             var holder = document.getElementById('canvasHolder');
             canvas.width = holder.clientWidth;
             canvas.height = holder.clientHeight;
+            if (window.mtileSharp) {
+                // Pin the displayed size: the backing store is about to outgrow it.
+                canvas.style.width = '100vw';
+                canvas.style.height = '100vh';
+                canvas.style.display = 'block';
+            }
             canvas.addEventListener("contextmenu", e => e.preventDefault());
 
             window.requestAnimationFrame(tickJS);

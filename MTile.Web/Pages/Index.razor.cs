@@ -88,6 +88,19 @@ public partial class Index : IDisposable
         ("Citadel", "Citadel (terrain + melee)"),
         ("Ranger",  "Ranger (rushdown that chases)"),
     };
+    // "Sharp rendering" (high-DPI): render at the display's physical pixels. On by
+    // default, remembered in localStorage, overridable with ?sharp=0|1. tickJS sizes the
+    // canvas and reports the CSS size + scale each frame; Game1 reads them through its
+    // HighDpi hooks.
+    private bool _sharp = true;
+    private bool _sharpFromUrl;
+    private static Microsoft.Xna.Framework.Point s_cssSize;
+    private static float s_pixelScale = 1f;
+    private void OnSharpChanged(Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        _sharp = e.Value is true;
+        _ = JsRuntime.InvokeVoidAsync("mtileSetSharp", _sharp);
+    }
     private bool IsCoop => StageInfo?.Coop ?? false;
     private string StageLabel => StageInfo?.Label ?? _stage;
     private string PeerNoun => IsCoop ? "partner" : "opponent";
@@ -133,6 +146,7 @@ public partial class Index : IDisposable
             // ?stage=NAME preselects a lobby stage (handy for links and the smoke harness).
             if (kv.Length == 2 && kv[0] == "stage" && LobbyStages.Find(Uri.UnescapeDataString(kv[1])) is { } pick)
                 _stage = pick.Name;
+            if (kv.Length == 2 && kv[0] == "sharp") { _sharp = kv[1] != "0"; _sharpFromUrl = true; }
         }
     }
 
@@ -141,6 +155,11 @@ public partial class Index : IDisposable
         if (!firstRender) return;
         try { _signalReady = await JsRuntime.InvokeAsync<bool>("mtileSignal.isConfigured"); }
         catch { _signalReady = false; }
+        if (!_sharpFromUrl)
+        {
+            try { _sharp = await JsRuntime.InvokeAsync<bool>("mtileGetSharp"); }
+            catch { }
+        }
         StateHasChanged();
     }
 
@@ -488,15 +507,20 @@ public partial class Index : IDisposable
 
     // Called every animation frame from tickJS. Returning false stops the rAF loop.
     [JSInvokable]
-    public bool TickDotNet()
+    public bool TickDotNet(int cssWidth, int cssHeight, double pixelScale)
     {
         try
         {
+            s_cssSize = new Microsoft.Xna.Framework.Point(cssWidth, cssHeight);
+            s_pixelScale = (float)pixelScale;
+
             // Let the loading overlay reach the screen before the boot freeze.
             if (!_paintedOnce) { _paintedOnce = true; return true; }
 
             if (_game == null)
             {
+                MTile.Game1.HighDpiHook = () => s_pixelScale;
+                MTile.Game1.HighDpiPointsHook = () => s_cssSize;
                 var g = _net != null ? new MTile.Game1(_net) : new MTile.Game1();
                 g.StageOverride = _stage;
                 // Solo in the browser is just the player unless the lobby's "P2 AI"
@@ -540,7 +564,7 @@ public partial class Index : IDisposable
         StateHasChanged();
 
         _selfRef ??= DotNetObjectReference.Create(this);
-        _ = JsRuntime.InvokeVoidAsync("initRenderJS", _selfRef);
+        _ = JsRuntime.InvokeVoidAsync("initRenderJS", _selfRef, _sharp);
     }
 
     // ── plumbing ────────────────────────────────────────────────────────────────

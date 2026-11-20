@@ -108,6 +108,11 @@ public sealed class GameConfig
     // MLS-deformed sprite skin over the rig. No effect until the named binding exists;
     // independent of DebugDrawSkeleton (stick figure).
     public bool DrawPlayerSpriteSkin       { get; set; } = true;
+    // Shade character skins by the terrain light field (darker in caves), per vertex.
+    public bool LightCharacters            { get; set; } = true;
+    // Ink-and-wash terrain (continuous wash fills, ink seams and contours, rounded
+    // corners, drawn grass) instead of the pixel-block look.
+    public bool InkTerrain                 { get; set; } = true;
     // Base rig the in-game animator runs: Skeletons/<name>.json, with its clip pool at
     // SkeletonStates/<name>/. Sprite skins bake against THIS rig, so a binding authored
     // on another skeleton needs this switched (render-only — the sim never sees it).

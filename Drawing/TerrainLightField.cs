@@ -156,6 +156,23 @@ public sealed class TerrainLightField
     public float ShadeAt(int gtx, int gty)
         => Brightness(MathF.Min(1f, LightAt(gtx, gty) / SolidDecay));
 
+    // Brightness for something standing IN the world at a world-space point (a character
+    // vertex), bilinear between cell centres so it grades smoothly across a cave mouth.
+    // Solid cells contribute their tile shade (ShadeAt), so feet resting on a floor take
+    // the floor's brightness instead of the darker raw value inside the rock.
+    public float BrightnessAtWorld(Vector2 world)
+    {
+        float fx = world.X / Chunk.TileSize - 0.5f, fy = world.Y / Chunk.TileSize - 0.5f;
+        int x0 = (int)MathF.Floor(fx), y0 = (int)MathF.Floor(fy);
+        float tx = fx - x0, ty = fy - y0;
+        float top = CellBrightness(x0, y0)     * (1f - tx) + CellBrightness(x0 + 1, y0)     * tx;
+        float bot = CellBrightness(x0, y0 + 1) * (1f - tx) + CellBrightness(x0 + 1, y0 + 1) * tx;
+        return top * (1f - ty) + bot * ty;
+    }
+
+    private float CellBrightness(int gtx, int gty)
+        => KindAt(gtx, gty) == Solid ? ShadeAt(gtx, gty) : Brightness(LightAt(gtx, gty));
+
     // Light → on-screen brightness multiplier, with the floor applied.
     public static float Brightness(float light) => MinLight + (1f - MinLight) * light;
 

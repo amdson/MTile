@@ -165,6 +165,9 @@ public class Game1 : Game
     // mouse positions (still reported in points) are multiplied up before they meet the
     // camera, and the HUD is drawn into a points-sized target and blitted (see Draw).
     public static Func<float> HighDpiHook;
+    // Optional: the window's size in points, for a host whose ClientBounds is already in
+    // pixels (the browser, where it is the canvas's backing size). Null = ClientBounds.
+    public static Func<Point> HighDpiPointsHook;
     private float _dpiScale = 1f;
     private Point _dpiClient;
     private RenderTarget2D _hudTarget;
@@ -173,7 +176,7 @@ public class Game1 : Game
     private void SyncHighDpi()
     {
         if (HighDpiHook == null || !_config.HighDpi) return;
-        var client = Window.ClientBounds.Size;
+        var client = HighDpiPointsHook?.Invoke() ?? Window.ClientBounds.Size;
         if (client.X <= 0 || client.Y <= 0) return;
         if (client != _dpiClient)
         {
@@ -806,6 +809,18 @@ public class Game1 : Game
             }
         }
         catch (Exception) { /* cosmetic only — flat fills without it */ }
+        // Ink-and-wash terrain: generated strokes + wash, and the drawn grass tufts.
+        if (_config.InkTerrain)
+        {
+            try
+            {
+                _chunkRenderer.Ink = TerrainInk.Build(GraphicsDevice);
+                using var grass = OpenAsset("grass_tufts.png");
+                if (grass != null)
+                    _chunkRenderer.GrassTufts = GrassTuftSheet.Build(Texture2D.FromStream(GraphicsDevice, grass));
+            }
+            catch (Exception) { /* cosmetic only — falls back to whatever was built */ }
+        }
         BootMark("rock atlas built");
         _glowField = new GlowTrailField(GraphicsDevice, downscale: 2)
         {
@@ -1393,6 +1408,7 @@ public class Game1 : Game
             var cam = _camera.GetDrawTransform(_screenCenter);
             float frameDt = (float)gameTime.ElapsedGameTime.TotalSeconds;
             bool split = false;
+            var skinLight = _config.LightCharacters ? _chunkRenderer.Light : null;
             var skin0 = SkinForPlayer(0);
             if (skin0 != null)
             {
@@ -1406,7 +1422,7 @@ public class Game1 : Game
                 _elements.Draw(cam, player, skin0.Elements, front: false);
                 // The skin alone squashes through a turning clip's mirror (TurnScale).
                 var skinXf0 = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale * _animator.TurnScale, SkeletonScale));
-                skin0.Draw(cam, _animator.Pose, skinXf0, flash: _hitFlash.Intensity(player.Id), front: _animator.FrontBones);
+                skin0.Draw(cam, _animator.Pose, skinXf0, flash: _hitFlash.Intensity(player.Id), front: _animator.FrontBones, light: skinLight);
                 _elements.Draw(cam, player, skin0.Elements, front: true);
             }
             for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
@@ -1424,11 +1440,13 @@ public class Game1 : Game
                 _elements.Update(p, skin, anim.Pose, rootXf, frameDt, _elementSolid);
                 _elements.Draw(cam, p, skin.Elements, front: false);
                 var skinXf = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale * anim.TurnScale, SkeletonScale));
-                skin.Draw(cam, anim.Pose, skinXf, flash: _hitFlash.Intensity(p.Id), front: anim.FrontBones);
+                skin.Draw(cam, anim.Pose, skinXf, flash: _hitFlash.Intensity(p.Id), front: anim.FrontBones, light: skinLight);
                 _elements.Draw(cam, p, skin.Elements, front: true);
             }
             if (split) _spriteBatch.Begin(transformMatrix: cam);
         }
+        // Short grass over the characters' feet (ink terrain only; no-op otherwise).
+        _chunkRenderer.DrawGrassFront(_sim.Chunks);
         _prof.End(_sSkins, tSkins);
 
         long tSkel = _prof.Begin();

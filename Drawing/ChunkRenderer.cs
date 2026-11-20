@@ -8,7 +8,7 @@ namespace MTile;
 // damage), platform rects, live sprouts, and ghost outlines of queued sprouts.
 // Runs inside Game1's world-space SpriteBatch pass — Begin/End is the caller's
 // responsibility. Tile fills use TilePalette so colors match the HUD/particles.
-public sealed class ChunkRenderer
+public sealed partial class ChunkRenderer
 {
     private readonly SpriteBatch    _spriteBatch;
     private readonly Texture2D      _pixel;
@@ -51,14 +51,25 @@ public sealed class ChunkRenderer
         UpdateLightField(chunks);
         // Behind the tiles: dark earth in underground / unlit open cells.
         _backWall.Atlas = Atlas;
+        _backWall.FillNotches = Ink != null;
         _backWall.Draw(chunks, _light, _visMinX, _visMinY, _visMaxX, _visMaxY);
 
-        foreach (var chunk in chunks)
-            DrawChunk(chunk, chunks);
-
-        // Grass caps over the finished tiles (render-only growth; see GrassField).
+        // Grass is render-only growth (see GrassField); the ink fills read it.
         _grass.Update(chunks, time);
-        _grass.Draw(_spriteBatch, _pixel, chunks, _visMinX, _visMinY, _visMaxX, _visMaxY);
+        if (Ink != null)
+        {
+            foreach (var chunk in chunks) DrawInkFills(chunk, chunks);
+            foreach (var chunk in chunks) DrawInkLines(chunk, chunks);
+            if (GrassTufts != null)
+                _grass.DrawTufts(_spriteBatch, GrassTufts, chunks, _light, _visMinX, _visMinY, _visMaxX, _visMaxY, front: false);
+        }
+        else
+        {
+            foreach (var chunk in chunks)
+                DrawChunk(chunk, chunks);
+            // Grass caps over the finished tiles.
+            _grass.Draw(_spriteBatch, _pixel, chunks, _visMinX, _visMinY, _visMaxX, _visMaxY);
+        }
 
         DrawOwnership(chunks);
         // Block-eater vines over infected cells (Drawing/BlockEaterRenderer.cs).
@@ -505,6 +516,9 @@ public sealed class ChunkRenderer
     private const int EdgeLeft = 1, EdgeTop = 2, EdgeRight = 4, EdgeBottom = 8, TileCharged = 16;
 
     private readonly TerrainLightField _light = new();
+    // This frame's light field (valid after Draw) — for lighting things that stand in the
+    // world, i.e. character skins.
+    public TerrainLightField Light => _light;
     private readonly GrassField _grass = new();
     // Visible cell window, set by UpdateLightField; tile loops are clipped to it.
     private int _visMinX, _visMinY, _visMaxX, _visMaxY;

@@ -32,6 +32,7 @@ public sealed class SpriteSkin : IDisposable
         public Texture2D Texture;
         public bool      OwnsTexture;
         public VertexPositionColorTexture[] Verts;
+        public Color     BaseColor;             // the layer's unlit vertex colour (spec tint)
         public short[]           Indices;
         public Vector2[]         RigLocal;      // deformed vertex positions, rig-local
         public SkinHandleLayout  Handles;       // bone-filtered
@@ -387,6 +388,7 @@ public sealed class SpriteSkin : IDisposable
             var (tr, tg, tb) = ParseColor(spec.Tint);
             vertColor = new Color(tr, tg, tb);
         }
+        layer.BaseColor = vertColor;
         var restRig = new Vector2[positions.Count];
         for (int i = 0; i < positions.Count; i++)
         {
@@ -435,8 +437,11 @@ public sealed class SpriteSkin : IDisposable
     // Drawing/HitFlash.cs. It has to be a second additive pass rather than a tint:
     // BasicEffect outputs texture × vertex colour, which can darken artwork but never
     // brighten it.
+    // `light` (optional) shades each vertex by the terrain light at its world position, so
+    // the character darkens with the stage; null draws the artwork unlit.
     public void Draw(Matrix cameraTransform, SkeletonPose pose, in Affine2 root, bool fill = true,
-                     float flash = 0f, IReadOnlyList<string> front = null)
+                     float flash = 0f, IReadOnlyList<string> front = null,
+                     TerrainLightField light = null)
     {
         OrderLayers(front);
         if (pose.Count != _skeleton.Count)
@@ -451,6 +456,14 @@ public sealed class SpriteSkin : IDisposable
             {
                 Vector2 p = root.TransformPoint(layer.RigLocal[i]);
                 layer.Verts[i].Position = new Vector3(p, 0f);
+                // Premultiplied textures: scale rgb only, alpha stays.
+                Color c = layer.BaseColor;
+                if (light != null)
+                {
+                    float b = light.BrightnessAtWorld(p);
+                    c = new Color((byte)(c.R * b), (byte)(c.G * b), (byte)(c.B * b), c.A);
+                }
+                layer.Verts[i].Color = c;
             }
         }
         if (!fill) return;

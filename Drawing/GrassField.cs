@@ -174,6 +174,52 @@ public sealed class GrassField
         }
     }
 
+    // Growth on a cell, 0 when it has none. The caller owns the live eligibility test.
+    public float GrowthAt(int gtx, int gty) => _growth.TryGetValue((gtx, gty), out float g) ? g : 0f;
+
+    // Tallest tuft, world px, at full growth and scale 1.
+    private const float TuftHeight = 7f;
+    // Back tufts per grassed cell.
+    private const int TuftsPerCell = 3;
+    // Tuft bases sit this far below the surface line, so they grow out of the turf wash.
+    private const float TuftSink = 0.7f;
+
+    // Drawn tufts for the ink look. Back tufts (front: false) go down with the terrain;
+    // front tufts are a sparser, shorter set drawn after the characters.
+    public void DrawTufts(SpriteBatch batch, GrassTuftSheet sheet, ChunkMap chunks, TerrainLightField light,
+                          int minGtx, int minGty, int maxGtx, int maxGty, bool front)
+    {
+        const int T = Chunk.TileSize;
+        float unit = TuftHeight / sheet.MaxHeight;
+        foreach (var kv in _growth)
+        {
+            var (gtx, gty) = kv.Key;
+            if (gtx < minGtx - 1 || gtx > maxGtx + 1 || gty < minGty || gty > maxGty + 1) continue;
+            if (!IsDirt(chunks, gtx, gty) || !Eligible(chunks, gtx, gty)) continue;
+            if (chunks.Charge.IsCharged(gtx, gty)) continue;
+
+            float g = kv.Value;
+            // Lit like the air they stand in.
+            float b = TerrainLightField.Brightness(light.LightAt(gtx, gty - 1))
+                    * TileVariation.Brightness(TileType.Dirt, gtx, gty);
+            // Pulled toward the turf wash's green, so tufts and band read as one plant.
+            var tint = new Color(0.80f * b, 0.93f * b, 0.70f * b, 1f);
+            uint h = Hash(gtx, gty);
+            int count = front ? ((h & 3) == 0 ? 0 : 1) : TuftsPerCell;
+            for (int i = 0; i < count; i++)
+            {
+                uint hi = Hash((int)h + i * 7919 + (front ? 104729 : 0), i);
+                var src = sheet.Tufts[(int)(hi % (uint)sheet.Tufts.Length)];
+                float r1 = ((hi >> 8) & 0xFF) / 255f, r2 = ((hi >> 16) & 0xFF) / 255f;
+                float scale = unit * (0.75f + 0.5f * r1) * (0.35f + 0.65f * g) * (front ? 0.6f : 1f);
+                float cx = gtx * T + (i + 0.15f + 0.7f * r2) / count * T;
+                batch.Draw(sheet.Texture, new Vector2(cx, gty * T + TuftSink + (front ? 0.6f : 0f)), src, tint, 0f,
+                    new Vector2(src.Width * 0.5f, src.Height), scale,
+                    (hi & 1) != 0 ? SpriteEffects.FlipHorizontally : SpriteEffects.None, 0f);
+            }
+        }
+    }
+
     private static Color Shade(Color c, float f) => new(
         (int)Math.Min(255f, c.R * f), (int)Math.Min(255f, c.G * f), (int)Math.Min(255f, c.B * f), 255);
 

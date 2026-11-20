@@ -88,7 +88,10 @@ namespace MTile
                 MousePosition = mouseState.Position,
                 MouseWorldPosition = mouseWorldPosition,
                 Space = keyboardState.IsKeyDown(Keys.Space),
+                // TEMP (screenshot session): Shift is ignored so Cmd+Shift+4 doesn't raise the
+                // guard. Restore the line below and delete this one when done.
                 Shift = keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift),
+                // Shift = false,
                 F     = keyboardState.IsKeyDown(Keys.F),
                 R     = keyboardState.IsKeyDown(Keys.R),
                 P     = keyboardState.IsKeyDown(Keys.P),
