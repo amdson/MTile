@@ -83,6 +83,11 @@
   "GrabChaseMaxSeconds": 0.25,
   "GrabSwipeSmoothing": 0.35,
   "GrabPointMaxSeconds": 0.25,
+  // Hits INTO PLAYERS. KnockbackSpeedScale: the velocity a hit gives, as a multiple of the
+  // attack's own dv. LaunchDecayScale: multiplies every hit's launch decay - lower = the
+  // launch flies longer at the same starting speed (carry and flight time go as 1/scale).
+  "KnockbackSpeedScale": 0.75,
+  "LaunchDecayScale": 0.5,
   // Launch decay (Physics/Launch.cs), px/s² on top of gravity + drag. Coast distance
   // from speed v is v²/(2·decay). 0 = off (plain knockback velocity).
   "WhipKickLaunchDecay": 400,

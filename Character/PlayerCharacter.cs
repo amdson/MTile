@@ -411,8 +411,9 @@ public class PlayerCharacter : IHittable
     private void Launch(Vector2 dv, in Hitbox hit)
     {
         var c = _abilities.Combat;
-        if (c.HoldingBody) LaunchSystem.Hit(Body, ref c.HeldVelocity, dv, hit.LaunchDecay, hit.LaunchImpactMass, hit.LaunchBounce);
-        else               LaunchSystem.Hit(Body, ref Body.Velocity,  dv, hit.LaunchDecay, hit.LaunchImpactMass, hit.LaunchBounce);
+        float decay = hit.LaunchDecay * MovementConfig.Current.LaunchDecayScale;
+        if (c.HoldingBody) LaunchSystem.Hit(Body, ref c.HeldVelocity, dv, decay, hit.LaunchImpactMass, hit.LaunchBounce);
+        else               LaunchSystem.Hit(Body, ref Body.Velocity,  dv, decay, hit.LaunchImpactMass, hit.LaunchBounce);
         c.Launched = true;
     }
     

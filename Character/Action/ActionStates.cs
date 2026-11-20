@@ -663,7 +663,7 @@ public abstract class SlashLikeAction : ActionState
     // more and light targets still ping. MinLaunch keeps repeat juggle hits
     // alive: a ball already flying away faster than the swing (u ≤ 0) still
     // visibly pops instead of a dead connect.
-    internal  const   float    SlashStrikeMass     = 2.5f;   // internal: the spitter's shot hits like S1 (PlantTuning)
+    internal  const   float    SlashStrikeMass     = 2.5f;   // default for StrikeMass below. internal: the spitter's shot hits like S1 (PlantTuning)
     internal  const   float    SlashRestitution    = 0.5f;
     // Was 180 — half the player's run speed handed out for merely connecting, which
     // is a good part of why the light slashes read as hitting a beach ball. The floor
@@ -724,6 +724,10 @@ public abstract class SlashLikeAction : ActionState
     // Collision mode with a near-zero closing speed and this floor IS its knockback.
     // Override to 0 only for a variant whose closing speed is large by construction.
     protected virtual  float   MinLaunch           => SlashMinLaunch;
+    // Collision-mode mass of the strike. Against a body of mass m the victim's dv is
+    // (1+e)·M/(M+m)·u: 0.75u at the default (equal to the player), 1.0u at 2x, never
+    // past 1.5u. The attacker's recoil impulse grows with it.
+    protected virtual  float   StrikeMass          => SlashStrikeMass;
     protected abstract Color   SlashColor          { get; }
     protected abstract bool    RequireGround       { get; }
     protected abstract bool    RequireAir          { get; }
@@ -939,7 +943,7 @@ public abstract class SlashLikeAction : ActionState
                 strikeDir: vars.AttackDir,
                 strikeVelocity: ctx.Body.Velocity * StrikeBodyVelocityShare
                                 + vars.AttackDir * StrikeSpeed,
-                strikeMass: SlashStrikeMass,
+                strikeMass: StrikeMass,
                 restitution: SlashRestitution,
                 minLaunch: MinLaunch,
                 shape: shape, shapePos: pos, shapeRotation: rot,
@@ -2535,11 +2539,12 @@ public class DashSlash : SlashLikeAction
     // victim dv ~135 -> ~195, carry ~40 -> ~80 px); stun is per-hitbox (none here), so
     // the higher dv doesn't stun. The reach and the 65px dash burst are what it buys;
     // the whiff tail (EndLag, air dash spent) is what it costs.
-    protected override float StrikeSpeed         => 260f;
+    protected override float StrikeSpeed         => 400f;
+    protected override float StrikeMass          => 5f;      // 2x the player: dv 1.0u instead of 0.75u (2026-11-19)
     protected override float StrikeBodyVelocityShare => 0f;
     protected override float BodyDamageScale     => 0.4f;    // 0.20 HP
-    protected override float HitstunSecondsOverride => 0.20f;   // 12f, == the hit tail: neutral on hit
-    protected override float LaunchDecay         => 60f;    // sets the carry (see StrikeSpeed)
+    protected override float HitstunSecondsOverride => 0.24f;   // 12f, == the hit tail: neutral on hit
+    protected override float LaunchDecay         => 30f;    // sets the carry (see StrikeSpeed)
     protected override Color SlashColor          => Color.Aquamarine;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => false;

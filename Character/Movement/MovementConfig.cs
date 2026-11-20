@@ -94,7 +94,7 @@ public class MovementConfig
     // before. Bodies that want to bounce off non-breaking tiles (e.g. the
     // player off stone) lower this so the swept-impact path sees the hit.
     public float MaxGroundEngageVnRel { get; set; } = 300f;
-    public float WalkAccel { get; set; } = 1800f;
+    public float WalkAccel { get; set; } = 450f;
     public float MaxWalkSpeed { get; set; } = 60f;
     // Legacy: used to be StandingState/CrouchedState's brake force when no input.
     // Now the equivalent role is played by SurfaceContact.Friction (set on floor
@@ -405,6 +405,11 @@ public class MovementConfig
     // .OnHit), not the hit's impulse, so armor/stun/hitstun thresholds — which read the
     // unscaled dv — are unchanged. Part of the todo #9 slowdown.
     public float KnockbackSpeedScale     { get; set; } = 0.75f;
+    // Launches INTO PLAYERS: scales every hit's LaunchDecay (PlayerCharacter.Launch), so a
+    // launch keeps its starting speed and flies longer. Carry and flight time both go as
+    // 1/scale. Throws (ThrowLaunchDecay) and hits on entities are not scaled. 2026-11-19:
+    // 0.5, so a launch outlasts the attacker's walk-up and neutral resets.
+    public float LaunchDecayScale        { get; set; } = 0.5f;
 
     public float SproutLifetime          { get; set; } = 0.07f;   // painting / default
     public float AvalancheSproutLifetime { get; set; } = 0.04f;   // wave-tagged cells
